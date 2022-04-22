@@ -14,11 +14,10 @@ handler.inference('music.mp3')
 ## Citations
 
 ```bibtex
-@unknown{unknown,
-author = {Gardner, Josh and Simon, Ian and Manilow, Ethan and Hawthorne, Curtis and Engel, Jesse},
-year = {2021},
-month = {11},
-pages = {},
-title = {MT3: Multi-Task Multitrack Music Transcription}
+@article{gardner2021mt3,
+  title={MT3: Multi-Task Multitrack Music Transcription},
+  author={Gardner, Josh and Simon, Ian and Manilow, Ethan and Hawthorne, Curtis and Engel, Jesse},
+  journal={arXiv preprint arXiv:2111.03017},
+  year={2021}
 }
 ```
