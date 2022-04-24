@@ -96,7 +96,6 @@ class InferenceHandler:
             frame_times_batch.append(frame_times[start_idx: end_idx])
         return batchs, frame_times_batch
 
-
     def _get_program_ids(self, valid_programs) -> List[List[int]]:
         min_program_id, max_program_id = self.codec.event_type_range('program')
         total_programs = max_program_id - min_program_id
@@ -108,9 +107,9 @@ class InferenceHandler:
         invalid_programs = self.vocab.encode(invalid_programs)
         return [[p] for p in invalid_programs]
 
-        
     # TODO Force generate using subset of instrument instead of all.
-    def inference(self, audio_path, outpath=None, valid_programs=None):
+
+    def inference(self, audio_path, outpath=None, valid_programs=None, num_beams=1):
         audio, _ = librosa.load(audio_path, sr=self.SAMPLE_RATE)
         if valid_programs is not None:
             invalid_programs = self._get_program_ids(valid_programs)
@@ -122,7 +121,7 @@ class InferenceHandler:
         inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times)
         for batch in tqdm(inputs_tensor):
             batch = batch.to(self.device)
-            result = self.model.generate(inputs=batch, max_length=1024, num_beams=1, do_sample=False,
+            result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
                                          length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, early_stopping=False, bad_words_ids=invalid_programs)
             result = self._postprocess_batch(result)
             results.append(result)
