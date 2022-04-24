@@ -112,7 +112,6 @@ class InferenceHandler:
     # TODO Force generate using subset of instrument instead of all.
     def inference(self, audio_path, outpath=None, valid_programs=None):
         audio, _ = librosa.load(audio_path, sr=self.SAMPLE_RATE)
-        audio = audio[:10 * self.SAMPLE_RATE]
         if valid_programs is not None:
             invalid_programs = self._get_program_ids(valid_programs)
         else:
