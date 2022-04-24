@@ -29,6 +29,7 @@ class InferenceHandler:
         self.spectrogram_config = spectrograms.SpectrogramConfig()
         self.codec = vocabularies.build_codec(vocab_config=vocabularies.VocabularyConfig(
             num_velocity_bins=1))
+        self.vocab = vocabularies.vocabulary_from_codec(self.codec)
         self.device = device
         self.model = model
         self.model.to(self.device)
@@ -95,9 +96,27 @@ class InferenceHandler:
             frame_times_batch.append(frame_times[start_idx: end_idx])
         return batchs, frame_times_batch
 
+
+    def _get_program_ids(self, valid_programs) -> List[List[int]]:
+        min_program_id, max_program_id = self.codec.event_type_range('program')
+        total_programs = max_program_id - min_program_id
+        invalid_programs = []
+        for p in range(total_programs):
+            if p not in valid_programs:
+                invalid_programs.append(p)
+        invalid_programs = [min_program_id + id for id in invalid_programs]
+        invalid_programs = self.vocab.encode(invalid_programs)
+        return [[p] for p in invalid_programs]
+
+        
     # TODO Force generate using subset of instrument instead of all.
-    def inference(self, audio_path, outpath=None):
+    def inference(self, audio_path, outpath=None, valid_programs=None):
         audio, _ = librosa.load(audio_path, sr=self.SAMPLE_RATE)
+        audio = audio[:10 * self.SAMPLE_RATE]
+        if valid_programs is not None:
+            invalid_programs = self._get_program_ids(valid_programs)
+        else:
+            invalid_programs = None
         inputs, frame_times = self._preprocess(audio)
         inputs_tensor = torch.from_numpy(inputs)
         results = []
@@ -105,7 +124,7 @@ class InferenceHandler:
         for batch in tqdm(inputs_tensor):
             batch = batch.to(self.device)
             result = self.model.generate(inputs=batch, max_length=1024, num_beams=1, do_sample=False,
-                                         length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, early_stopping=False)
+                                         length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, early_stopping=False, bad_words_ids=invalid_programs)
             result = self._postprocess_batch(result)
             results.append(result)
         event = self._to_event(results, frame_times)
@@ -119,7 +138,7 @@ class InferenceHandler:
         after_eos = torch.cumsum(
             (result == self.model.config.eos_token_id).float(), dim=-1)
         # minus special token
-        result = result - 3
+        result = result - self.vocab.num_special_tokens()
         result = torch.where(after_eos.bool(), -1, result)
         # remove bos
         result = result[:, 1:]

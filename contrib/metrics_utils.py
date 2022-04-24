@@ -24,7 +24,6 @@ from contrib import event_codec, note_sequences, run_length_encoding
 import note_seq
 import numpy as np
 import pretty_midi
-import sklearn
 
 S = TypeVar('S')
 T = TypeVar('T')
@@ -175,6 +174,7 @@ def frame_metrics(ref_pianoroll: np.ndarray,
                   est_pianoroll: np.ndarray,
                   velocity_threshold: int) -> Tuple[float, float, float]:
     """Frame Precision, Recall, and F1."""
+    import sklearn
     # Pad to same length
     if ref_pianoroll.shape[1] > est_pianoroll.shape[1]:
         diff = ref_pianoroll.shape[1] - est_pianoroll.shape[1]

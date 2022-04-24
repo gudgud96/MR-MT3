@@ -15,14 +15,12 @@
 """Tools for run length encoding."""
 
 import dataclasses
-from typing import Any, Callable, Mapping, MutableMapping, Tuple, Optional, Sequence, TypeVar
+from typing import Any, Callable, Tuple, Optional, Sequence, TypeVar
 
 from absl import logging
 from contrib import event_codec
 
 import numpy as np
-import seqio
-import tensorflow as tf
 
 Event = event_codec.Event
 
@@ -165,109 +163,6 @@ def encode_and_index_events(
 
     return (events, event_start_indices, event_end_indices,
             state_events, state_event_indices)
-
-
-@seqio.map_over_dataset
-def extract_target_sequence_with_indices(features, state_events_end_token=None):
-    """Extract target sequence corresponding to audio token segment."""
-    target_start_idx = features['input_event_start_indices'][0]
-    target_end_idx = features['input_event_end_indices'][-1]
-
-    features['targets'] = features['targets'][target_start_idx:target_end_idx]
-
-    if state_events_end_token is not None:
-        # Extract the state events corresponding to the audio start token, and
-        # prepend them to the targets array.
-        state_event_start_idx = features['input_state_event_indices'][0]
-        state_event_end_idx = state_event_start_idx + 1
-        while features['state_events'][
-                state_event_end_idx - 1] != state_events_end_token:
-            state_event_end_idx += 1
-        features['targets'] = tf.concat([
-            features['state_events'][state_event_start_idx:state_event_end_idx],
-            features['targets']
-        ], axis=0)
-
-    return features
-
-
-def run_length_encode_shifts_fn(
-    codec: event_codec.Codec,
-    feature_key: str = 'targets',
-    state_change_event_types: Sequence[str] = ()
-) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
-    """Return a function that run-length encodes shifts for a given codec.
-
-    Args:
-      codec: The Codec to use for shift events.
-      feature_key: The feature key for which to run-length encode shifts.
-      state_change_event_types: A list of event types that represent state
-          changes; tokens corresponding to these event types will be interpreted
-          as state changes and redundant ones will be removed.
-
-    Returns:
-      A preprocessing function that run-length encodes single-step shifts.
-    """
-    state_change_event_ranges = [codec.event_type_range(event_type)
-                                 for event_type in state_change_event_types]
-
-    def run_length_encode_shifts(
-        features: MutableMapping[str, Any]
-    ) -> Mapping[str, Any]:
-        """Combine leading/interior shifts, trim trailing shifts.
-
-        Args:
-          features: Dict of features to process.
-
-        Returns:
-          A dict of features.
-        """
-        events = features[feature_key]
-
-        shift_steps = 0
-        total_shift_steps = 0
-        output = tf.constant([], dtype=tf.int32)
-
-        current_state = tf.zeros(
-            len(state_change_event_ranges), dtype=tf.int32)
-
-        for event in events:
-            # Let autograph know that the shape of 'output' will change during the
-            # loop.
-            tf.autograph.experimental.set_loop_options(
-                shape_invariants=[(output, tf.TensorShape([None]))])
-            if codec.is_shift_event_index(event):
-                shift_steps += 1
-                total_shift_steps += 1
-
-            else:
-                # If this event is a state change and has the same value as the current
-                # state, we can skip it entirely.
-                is_redundant = False
-                for i, (min_index, max_index) in enumerate(state_change_event_ranges):
-                    if (min_index <= event) and (event <= max_index):
-                        if current_state[i] == event:
-                            is_redundant = True
-                        current_state = tf.tensor_scatter_nd_update(
-                            current_state, indices=[[i]], updates=[event])
-                if is_redundant:
-                    continue
-
-                # Once we've reached a non-shift event, RLE all previous shift events
-                # before outputting the non-shift event.
-                if shift_steps > 0:
-                    shift_steps = total_shift_steps
-                    while shift_steps > 0:
-                        output_steps = tf.minimum(
-                            codec.max_shift_steps, shift_steps)
-                        output = tf.concat([output, [output_steps]], axis=0)
-                        shift_steps -= output_steps
-                output = tf.concat([output, [event]], axis=0)
-
-        features[feature_key] = output
-        return features
-
-    return seqio.map_over_dataset(run_length_encode_shifts)
 
 
 def decode_events(

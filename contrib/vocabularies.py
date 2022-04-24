@@ -17,13 +17,11 @@
 import dataclasses
 import math
 
-from typing import Callable, Optional, Sequence
+from typing import Optional, Sequence
 from contrib import event_codec
 
 import note_seq
-import seqio
 import t5.data
-import tensorflow as tf
 
 
 DECODED_EOS_ID = -1
@@ -80,42 +78,6 @@ def drop_programs(tokens, codec: event_codec.Codec):
     return tokens[(tokens < min_program_id) | (tokens > max_program_id)]
 
 
-def programs_to_midi_classes(tokens, codec):
-    """Modifies program events to be the first program in the MIDI class."""
-    min_program_id, max_program_id = codec.event_type_range('program')
-    is_program = (tokens >= min_program_id) & (tokens <= max_program_id)
-    return tf.where(
-        is_program,
-        min_program_id + 8 * ((tokens - min_program_id) // 8),
-        tokens)
-
-
-@dataclasses.dataclass
-class ProgramGranularity:
-    # both tokens_map_fn and program_map_fn should be idempotent
-    tokens_map_fn: Callable[[Sequence[int], event_codec.Codec], Sequence[int]]
-    program_map_fn: Callable[[int], int]
-
-
-PROGRAM_GRANULARITIES = {
-    # "flat" granularity; drop program change tokens and set NoteSequence
-    # programs to zero
-    'flat': ProgramGranularity(
-        tokens_map_fn=drop_programs,
-        program_map_fn=lambda program: 0),
-
-    # map each program to the first program in its MIDI class
-    'midi_class': ProgramGranularity(
-        tokens_map_fn=programs_to_midi_classes,
-        program_map_fn=lambda program: 8 * (program // 8)),
-
-    # leave programs as is
-    'full': ProgramGranularity(
-        tokens_map_fn=lambda tokens, codec: tokens,
-        program_map_fn=lambda program: program)
-}
-
-
 def build_codec(vocab_config: VocabularyConfig):
     """Build event codec."""
     event_ranges = [
@@ -140,19 +102,19 @@ def build_codec(vocab_config: VocabularyConfig):
         event_ranges=event_ranges)
 
 
-def vocabulary_from_codec(codec: event_codec.Codec) -> seqio.Vocabulary:
-    return GenericTokenVocabulary(
-        codec.num_classes, extra_ids=t5.data.DEFAULT_EXTRA_IDS)
+def vocabulary_from_codec(codec: event_codec.Codec):
+    return GenericTokenVocabulary(codec.num_classes, extra_ids=t5.data.DEFAULT_EXTRA_IDS)
 
 
-class GenericTokenVocabulary(seqio.Vocabulary):
+class GenericTokenVocabulary():
     """Vocabulary with pass-through encoding of tokens."""
 
     def __init__(self, regular_ids: int, extra_ids: int = 0):
         # The special tokens: 0=PAD, 1=EOS, and 2=UNK
         self._num_special_tokens = 3
         self._num_regular_tokens = regular_ids
-        super().__init__(extra_ids=extra_ids)
+        self.extra_ids = extra_ids
+        super().__init__()
 
     @property
     def eos_id(self) -> Optional[int]:
@@ -171,7 +133,7 @@ class GenericTokenVocabulary(seqio.Vocabulary):
         """
         return self._num_special_tokens + self._num_regular_tokens
 
-    def _encode(self, token_ids: Sequence[int]) -> Sequence[int]:
+    def encode(self, token_ids: Sequence[int]) -> Sequence[int]:
         """Encode a list of tokens ids as a list of integers.
 
         To keep the first few ids for special tokens, increase ids by the number
@@ -193,7 +155,7 @@ class GenericTokenVocabulary(seqio.Vocabulary):
 
         return encoded
 
-    def _decode(self, ids: Sequence[int]) -> Sequence[int]:
+    def decode(self, ids: Sequence[int]) -> Sequence[int]:
         """Decode a list of integers to a list of token ids.
 
         The special tokens of PAD and UNK as well as extra_ids will be
@@ -220,55 +182,8 @@ class GenericTokenVocabulary(seqio.Vocabulary):
         ids = [_decode_id(i) for i in ids]
         return ids
 
-    def _encode_tf(self, token_ids: tf.Tensor) -> tf.Tensor:
-        """Encode a list of tokens to a tf.Tensor.
-
-        Args:
-          token_ids: array of audio token ids.
-
-        Returns:
-          a 1d tf.Tensor with dtype tf.int32
-        """
-        with tf.control_dependencies(
-            [tf.debugging.assert_less(
-                token_ids, tf.cast(self._num_regular_tokens, token_ids.dtype)),
-             tf.debugging.assert_greater_equal(
-                 token_ids, tf.cast(0, token_ids.dtype))
-             ]):
-            tf_ids = token_ids + self._num_special_tokens
-        return tf_ids
-
-    def _decode_tf(self, ids: tf.Tensor) -> tf.Tensor:
-        """Decode in TensorFlow.
-
-        The special tokens of PAD and UNK as well as extra_ids will be
-        replaced with DECODED_INVALID_ID in the output. If EOS is present, it and
-        all following tokens in the decoded output and will be represented by
-        DECODED_EOS_ID.
-
-        Args:
-          ids: a 1d tf.Tensor with dtype tf.int32
-
-        Returns:
-          a 1d tf.Tensor with dtype tf.int32
-        """
-        # Create a mask that is true from the first EOS position onward.
-        # First, create an array that is True whenever there is an EOS, then cumsum
-        # that array so that every position after and including the first True is
-        # >1, then cast back to bool for the final mask.
-        eos_and_after = tf.cumsum(
-            tf.cast(tf.equal(ids, self.eos_id), tf.int32), exclusive=False, axis=-1)
-        eos_and_after = tf.cast(eos_and_after, tf.bool)
-
-        return tf.where(
-            eos_and_after,
-            DECODED_EOS_ID,
-            tf.where(
-                tf.logical_and(
-                    tf.greater_equal(ids, self._num_special_tokens),
-                    tf.less(ids, self._base_vocab_size)),
-                ids - self._num_special_tokens,
-                DECODED_INVALID_ID))
+    def num_special_tokens(self):
+        return self._num_special_tokens
 
     def __eq__(self, other):
         their_extra_ids = other.extra_ids
