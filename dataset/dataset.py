@@ -12,16 +12,18 @@ from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_t
 
 class MidiMixDataset(Dataset):
 
-    def __init__(self, root_dir) -> None:
+    def __init__(self, root_dir, mel_length=256, event_length=1024, is_train=True, include_ties=True, ignore_pitch_bends=True, onsets_only=False) -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
         self.codec = vocabularies.build_codec(vocab_config=vocabularies.VocabularyConfig(
             num_velocity_bins=1))
-        self.is_train = True
+        self.mel_length = mel_length
+        self.event_length = event_length
         self.df = self._build_dataset(root_dir)
-        self.include_ties = True
-        self.ignore_pitch_bends = True
-        self.onsets_only = False
+        self.is_train = is_train
+        self.include_ties = include_ties
+        self.ignore_pitch_bends = ignore_pitch_bends
+        self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
 
     def _build_dataset(self, root_dir):
@@ -193,6 +195,13 @@ class MidiMixDataset(Dataset):
         ex['inputs'] = torch.from_numpy(np.array(spectrograms.compute_spectrogram(samples, self.spectrogram_config)))
         return ex
 
+    # TODO FIX THIS
+    def _drop_length(self, row):
+        out = {}
+        out['inputs'] = row['inputs'][:self.mel_length].to(torch.float32)
+        out['targets'] = torch.from_numpy(row['targets'][:self.event_length]).to(torch.long)
+        return out
+
     def __getitem__(self, idx):
         row = self.df[idx]
         note_sequences = self._parse_midi(row['midi_path'], row['inst_names'])
@@ -202,10 +211,12 @@ class MidiMixDataset(Dataset):
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
         row = self._tokenize(note_sequences, audio, row['inst_names'])
         # TODO split to 2000 length -> to get more data
-        # TODO select_random_chunk -> mel input length
+        # TODO select_random_chunk (from 2000) -> mel input(self.mel_length) length
         row = self._extract_target_sequence_with_indices(row, self.tie_token)
         row = self._run_length_encode_shifts(row)
         row = self._compute_spectrogram(row)
+        # TODO pad targets to 1024
+        row = self._drop_length(row)
         return row
 
     def __len__(self):
