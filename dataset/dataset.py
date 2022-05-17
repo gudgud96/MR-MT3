@@ -1,7 +1,9 @@
+from itertools import cycle
 import json
+import random
 from typing import List, Optional, Sequence, Tuple
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import IterableDataset
 import numpy as np
 import librosa
 import note_seq
@@ -10,7 +12,7 @@ from contrib import event_codec, note_sequences, spectrograms, vocabularies, run
 from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
 
 
-class MidiMixDataset(Dataset):
+class MidiMixIterDataset(IterableDataset):
 
     def __init__(self, root_dir, mel_length=256, event_length=1024, is_train=True, include_ties=True, ignore_pitch_bends=True, onsets_only=False) -> None:
         super().__init__()
@@ -26,7 +28,7 @@ class MidiMixDataset(Dataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
 
-    def _build_dataset(self, root_dir):
+    def _build_dataset(self, root_dir, shuffle=True):
         df = []
         audio_files = glob(f'{root_dir}/**/audio.wav')
         for a_f in audio_files:
@@ -35,6 +37,9 @@ class MidiMixDataset(Dataset):
                 inst_names = json.load(f)
             midi_path = a_f.replace('audio.wav', 'midi')
             df.append({'inst_names': inst_names, 'audio_path': a_f, 'midi_path': midi_path})
+
+        if shuffle:
+            random.shuffle(df)
         return df
 
     def _audio_to_frames(
@@ -195,40 +200,78 @@ class MidiMixDataset(Dataset):
         ex['inputs'] = torch.from_numpy(np.array(spectrograms.compute_spectrogram(samples, self.spectrogram_config)))
         return ex
 
-    # TODO FIX THIS
-    def _drop_length(self, row):
-        out = {}
-        out['inputs'] = row['inputs'][:self.mel_length].to(torch.float32)
-        out['targets'] = torch.from_numpy(row['targets'][:self.event_length]).to(torch.long)
-        return out
+    def _pad_length(self, row):
+        inputs = row['inputs'][:self.mel_length].to(torch.float32)
+        targets = torch.from_numpy(row['targets'][:self.event_length]).to(torch.long)
+        if inputs.shape[0] < self.mel_length:
+            pad = torch.zeros(self.mel_length - inputs.shape[0], inputs.shape[1], dtype=inputs.dtype, device=inputs.device)
+            inputs = torch.cat([inputs, pad], dim=0)
+        if targets.shape[0] < self.event_length:
+            pad = torch.zeros(self.event_length - targets.shape[0], dtype=targets.dtype, device=targets.device) # pad_token_id = 0 / -2
+            targets = torch.cat([targets, pad], dim=0)
+        return {'inputs': inputs, 'targets': targets}
+    
+    def _split_frame(self, row, length=2000):
+        rows = []
+        input_length = row['inputs'].shape[0]
+        for split in range(0, input_length, length):
+            if split + length >= input_length:
+                continue
+            new_row = {}
+            for k in row.keys():
+                if k in ['inputs', 'input_event_start_indices', 'input_event_end_indices', 'input_state_event_indices']:
+                    new_row[k] = row[k][split:split+length]
+                else:
+                    new_row[k] = row[k]
+            rows.append(new_row)
+        
+        if len(rows) == 0:
+            return [row]
+        return rows
+    
+    def _random_chunk(self, row):
+        new_row = {}
+        input_length = row['inputs'].shape[0]
+        random_length = input_length - self.mel_length
+        if random_length < 1:
+            return row
+        start_length = random.randint(0, random_length)
+        for k in row.keys():
+            if k in ['inputs', 'input_event_start_indices', 'input_event_end_indices', 'input_state_event_indices']:
+                new_row[k] = row[k][start_length:start_length+self.mel_length]
+            else:
+                new_row[k] = row[k]
+        return new_row
 
-    def __getitem__(self, idx):
-        row = self.df[idx]
-        note_sequences = self._parse_midi(row['midi_path'], row['inst_names'])
-        audio, sr = librosa.load(
-            row['audio_path'], sr=None)
-        if sr != self.spectrogram_config.sample_rate:
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
-        row = self._tokenize(note_sequences, audio, row['inst_names'])
-        # TODO split to 2000 length -> to get more data
-        # TODO select_random_chunk (from 2000) -> mel input(self.mel_length) length
-        row = self._extract_target_sequence_with_indices(row, self.tie_token)
-        row = self._run_length_encode_shifts(row)
-        row = self._compute_spectrogram(row)
-        # TODO pad targets to 1024
-        row = self._drop_length(row)
-        return row
+    def process_data(self):
+        for idx in range(len(self.df)):
+            row = self.df[idx]
+            note_sequences = self._parse_midi(row['midi_path'], row['inst_names'])
+            audio, sr = librosa.load(row['audio_path'], sr=None)
+            if sr != self.spectrogram_config.sample_rate:
+                audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
+            row = self._tokenize(note_sequences, audio, row['inst_names'])
+            rows = self._split_frame(row)
+            for row in rows:
+                row = self._random_chunk(row)
+                row = self._extract_target_sequence_with_indices(row, self.tie_token)
+                row = self._run_length_encode_shifts(row)
+                row = self._compute_spectrogram(row)
+                row = self._pad_length(row)
+                yield row
+            
+    def __iter__(self):
+        return cycle(self.process_data())
 
-    def __len__(self):
-        return len(self.df)
 
 
 
 if __name__ == '__main__':
     from torch.utils.data import DataLoader
-    dataset = MidiMixDataset(root_dir='/home/kunato/mt3/temp_data')
-    loader = DataLoader(dataset, batch_size=1)
-    batch = next(iter(loader))
-    print(batch)
-    print([(k, batch[k].shape) for k in batch.keys()])
+    dataset = MidiMixIterDataset(root_dir='/home/kunato/mt3/temp_data')
+    loader = DataLoader(dataset, batch_size=3)
+    for i in range(3):
+        batch = next(iter(loader))
+        print(batch)
+        print([(k, batch[k].shape) for k in batch.keys()])
     
