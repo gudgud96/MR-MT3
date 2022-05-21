@@ -1,0 +1,26 @@
+num_training_steps: 300_000
+
+data:
+  train_path: /mnt/2TB/dataset/midi/babyslakh_16k
+  test_path: /mnt/2TB/dataset/midi/babyslakh_16k
+  config:
+    midi_folder: MIDI
+    inst_filename: inst_names.json
+    audio_filename: mix.wav
+  # train_path: /home/kunato/mt3/temp_data
+  # test_path: /home/kunato/mt3/temp_data
+  # config:
+  #   midi_folder: midi
+  #   inst_filename: inst_names_dict.json
+  #   audio_filename: audio.wav
+
+event_length: 1024
+mel_length: 256
+pretrained: pretrained/mt3.pth
+
+lr: 2e-5
+
+per_device_batch_size: 8 # 64
+gradient_clip_val: 0
+grad_accum: 1
+gpus: 1

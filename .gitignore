@@ -1,3 +1,4 @@
 out/
 *.pyc
 main.py
+results/
