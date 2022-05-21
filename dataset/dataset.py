@@ -16,11 +16,15 @@ from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_t
 
 class MidiMixIterDataset(IterableDataset):
 
-    def __init__(self, root_dir, mel_length=256, event_length=1024, is_train=True, include_ties=True, ignore_pitch_bends=True, onsets_only=False) -> None:
+    def __init__(self, root_dir, mel_length=256, event_length=1024, is_train=True, include_ties=True, ignore_pitch_bends=True, onsets_only=False, audio_filename='mix.wav', midi_folder='MIDI', inst_filename='inst_names.json') -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
         self.codec = vocabularies.build_codec(vocab_config=vocabularies.VocabularyConfig(
             num_velocity_bins=1))
+        self.vocab = vocabularies.vocabulary_from_codec(self.codec)
+        self.audio_filename = audio_filename
+        self.midi_folder = midi_folder
+        self.inst_filename = inst_filename
         self.mel_length = mel_length
         self.event_length = event_length
         self.df = self._build_dataset(root_dir)
@@ -30,14 +34,14 @@ class MidiMixIterDataset(IterableDataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
 
-    def _build_dataset(self, root_dir, shuffle=True, audio_filename='mix.wav', midi_folder='MIDI'):
+    def _build_dataset(self, root_dir, shuffle=True):
         df = []
-        audio_files = glob(f'{root_dir}/**/{audio_filename}')
+        audio_files = glob(f'{root_dir}/**/{self.audio_filename}')
         for a_f in audio_files:
-            inst_path = a_f.replace(audio_filename, 'inst_names.json')
+            inst_path = a_f.replace(self.audio_filename, self.inst_filename)
+            midi_path = a_f.replace(self.audio_filename, self.midi_folder)
             with open(inst_path) as f:
                 inst_names = json.load(f)
-            midi_path = a_f.replace(audio_filename, midi_folder)
             df.append({'inst_names': inst_names, 'audio_path': a_f, 'midi_path': midi_path})
         assert len(df) > 0
         print('total file:', len(df))
@@ -210,12 +214,17 @@ class MidiMixIterDataset(IterableDataset):
     def _pad_length(self, row):
         inputs = row['inputs'][:self.mel_length].to(torch.float32)
         targets = torch.from_numpy(row['targets'][:self.event_length]).to(torch.long)
+        targets = targets + self.vocab.num_special_tokens()
         if inputs.shape[0] < self.mel_length:
             pad = torch.zeros(self.mel_length - inputs.shape[0], inputs.shape[1], dtype=inputs.dtype, device=inputs.device)
             inputs = torch.cat([inputs, pad], dim=0)
         if targets.shape[0] < self.event_length:
-            pad = torch.zeros(self.event_length - targets.shape[0], dtype=targets.dtype, device=targets.device) # pad_token_id = 0 / -2
-            targets = torch.cat([targets, pad], dim=0)
+            eos = torch.ones(1, dtype=targets.dtype, device=targets.device)
+            if self.event_length - targets.shape[0] - 1 > 0:
+                pad = torch.ones(self.event_length - targets.shape[0] - 1, dtype=targets.dtype, device=targets.device) * -100
+                targets = torch.cat([targets, eos, pad], dim=0)
+            else:
+                targets = torch.cat([targets, eos], dim=0)
         return {'inputs': inputs, 'targets': targets}
     
     def _split_frame(self, row, length=2000):

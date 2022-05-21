@@ -61,14 +61,14 @@ class MT3Net(pl.LightningModule):
 
     def train_dataloader(self):
         train_path = self.config.data.train_path
-        dataset = MidiMixIterDataset(train_path, mel_length=self.config.mel_length, event_length=self.config.event_length)
+        dataset = MidiMixIterDataset(train_path, mel_length=self.config.mel_length, event_length=self.config.event_length, **self.config.data.config)
         train_loader = DataLoader(
             dataset, batch_size=self.config.per_device_batch_size, num_workers=0, pin_memory=True)
         return train_loader
 
     def val_dataloader(self):
         test_path = self.config.data.test_path
-        dataset = MidiMixIterDataset(test_path, mel_length=self.config.mel_length, event_length=self.config.event_length)
+        dataset = MidiMixIterDataset(test_path, mel_length=self.config.mel_length, event_length=self.config.event_length, **self.config.data.config)
         val_loader = DataLoader(
             dataset, batch_size=self.config.per_device_batch_size, num_workers=0, pin_memory=True)
         return val_loader
@@ -77,7 +77,7 @@ class MT3Net(pl.LightningModule):
 def main(config, model_config, result_dir):
     model = MT3Net(config, model_config, result_dir)
     print(model)
-    logger = TensorBoardLogger(save_dir=result_dir,
+    logger = TensorBoardLogger(save_dir='/'.join(result_dir.split('/')[:-1]),
                                name=result_dir.split('/')[-1])
 
     num_training_steps = int(config['num_training_steps'])
