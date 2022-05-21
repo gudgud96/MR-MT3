@@ -4,7 +4,7 @@ import shutil
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
 from transformers import T5Config
-from dataset.dataset import MidiMixDataset
+from dataset.dataset import MidiMixIterDataset
 from torch.utils.data import DataLoader
 from models.t5 import T5ForConditionalGeneration
 import torch.nn as nn
@@ -61,16 +61,16 @@ class MT3Net(pl.LightningModule):
 
     def train_dataloader(self):
         train_path = self.config.data.train_path
-        dataset = MidiMixDataset(train_path, mel_length=self.config.mel_length, event_length=self.config.event_length)
+        dataset = MidiMixIterDataset(train_path, mel_length=self.config.mel_length, event_length=self.config.event_length)
         train_loader = DataLoader(
-            dataset, batch_size=self.config.per_device_batch_size, num_workers=8, shuffle=True, pin_memory=True)
+            dataset, batch_size=self.config.per_device_batch_size, num_workers=0, pin_memory=True)
         return train_loader
 
     def val_dataloader(self):
         test_path = self.config.data.test_path
-        dataset = MidiMixDataset(test_path, mel_length=self.config.mel_length, event_length=self.config.event_length)
+        dataset = MidiMixIterDataset(test_path, mel_length=self.config.mel_length, event_length=self.config.event_length)
         val_loader = DataLoader(
-            dataset, batch_size=self.config.per_device_batch_size, num_workers=1, pin_memory=True)
+            dataset, batch_size=self.config.per_device_batch_size, num_workers=0, pin_memory=True)
         return val_loader
 
 
@@ -92,7 +92,7 @@ def main(config, model_config, result_dir):
         callbacks=[lr_monitor, checkpoint_callback],
         precision=32,
         max_steps=num_training_steps,
-        accelerator='ddp',
+        accelerator='dp',
         accumulate_grad_batches=config.grad_accum)
 
     trainer.fit(model)

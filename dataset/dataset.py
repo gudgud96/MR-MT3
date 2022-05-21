@@ -1,7 +1,9 @@
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 from itertools import cycle
 import json
 import random
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 import torch
 from torch.utils.data import IterableDataset
 import numpy as np
@@ -28,16 +30,17 @@ class MidiMixIterDataset(IterableDataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
 
-    def _build_dataset(self, root_dir, shuffle=True):
+    def _build_dataset(self, root_dir, shuffle=True, audio_filename='mix.wav', midi_folder='MIDI'):
         df = []
-        audio_files = glob(f'{root_dir}/**/audio.wav')
+        audio_files = glob(f'{root_dir}/**/{audio_filename}')
         for a_f in audio_files:
-            inst_path = a_f.replace('audio.wav', 'inst_names.json')
+            inst_path = a_f.replace(audio_filename, 'inst_names.json')
             with open(inst_path) as f:
                 inst_names = json.load(f)
-            midi_path = a_f.replace('audio.wav', 'midi')
+            midi_path = a_f.replace(audio_filename, midi_folder)
             df.append({'inst_names': inst_names, 'audio_path': a_f, 'midi_path': midi_path})
-
+        assert len(df) > 0
+        print('total file:', len(df))
         if shuffle:
             random.shuffle(df)
         return df
@@ -59,12 +62,16 @@ class MidiMixIterDataset(IterableDataset):
         times = np.arange(num_frames) / \
             self.spectrogram_config.frames_per_second
         return frames, times
+
     
-    def _parse_midi(self, path, instrument_list):
+    def _parse_midi(self, path, instrument_dict: Dict[str, str]):
         note_seqs = []
-        for i, f in enumerate(instrument_list):
-            note_seqs.append(note_seq.midi_file_to_note_sequence(f'{path}/{i}.mid'))
-        return note_seqs
+
+        for filename in instrument_dict.keys():
+            # this can be pretty_midi.PrettyMIDI() obj / string path to midi
+            midi_path = f'{path}/{filename}.mid'
+            note_seqs.append(note_seq.midi_file_to_note_sequence(midi_path))
+        return note_seqs, instrument_dict.values()
 
     def _tokenize(self, tracks: List[note_seq.NoteSequence], samples: np.ndarray, inst_names: List[str], example_id: Optional[str] = None):
 
@@ -246,11 +253,11 @@ class MidiMixIterDataset(IterableDataset):
     def process_data(self):
         for idx in range(len(self.df)):
             row = self.df[idx]
-            note_sequences = self._parse_midi(row['midi_path'], row['inst_names'])
+            note_sequences, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
             audio, sr = librosa.load(row['audio_path'], sr=None)
             if sr != self.spectrogram_config.sample_rate:
                 audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
-            row = self._tokenize(note_sequences, audio, row['inst_names'])
+            row = self._tokenize(note_sequences, audio, inst_names)
             rows = self._split_frame(row)
             for row in rows:
                 row = self._random_chunk(row)
