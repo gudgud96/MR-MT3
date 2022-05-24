@@ -1,6 +1,6 @@
 ## MT3: Multi-Task Multitrack Music Transcription - Pytorch
 
-Implementation of MT3 in pytorch currently support only inference using official pretrained weight released in https://github.com/magenta/mt3.
+This is an unofficial implementation of MT3: Multi-Task Multitrack Music Transcription in pytorch.
 
 ## Usage
 
@@ -9,6 +9,10 @@ from inference import InferenceHandler
 
 handler = InferenceHandler('./pretrained')
 handler.inference('music.mp3')
+```
+
+```python
+# training not done yet
 ```
 
 ## Citations
