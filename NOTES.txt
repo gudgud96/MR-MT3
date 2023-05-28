@@ -1,0 +1,95 @@
+Unison Audio Baseline
+Drum onset F1 (flat): 0.0
+Drum onset F1 (full): 0.0
+Drum onset F1 (midi_class): 0.0
+Drum onset precision (flat): 0.0
+Drum onset precision (full): 0.0
+Drum onset precision (midi_class): 0.0
+Drum onset recall (flat): 0.0
+Drum onset recall (full): 0.0
+Drum onset recall (midi_class): 0.0
+Nondrum onset + offset + program F1 (flat): 0.2306
+Nondrum onset + offset + program F1 (full): 0.06584
+Nondrum onset + offset + program F1 (midi_class): 0.1194
+Nondrum onset + offset + program precision (flat): 0.2456
+Nondrum onset + offset + program precision (full): 0.06686
+Nondrum onset + offset + program precision (midi_class): 0.1245
+Nondrum onset + offset + program recall (flat): 0.2411
+Nondrum onset + offset + program recall (full): 0.0683
+Nondrum onset + offset + program recall (midi_class): 0.1236
+Onset + offset + program F1 (flat): 0.2267
+Onset + offset + program F1 (full): 0.06351
+Onset + offset + program F1 (midi_class): 0.1164
+Onset + offset + program precision (flat): 0.2397
+Onset + offset + program precision (full): 0.06383
+Onset + offset + program precision (midi_class): 0.1198
+Onset + offset + program recall (flat): 0.2411
+Onset + offset + program recall (full): 0.0683
+Onset + offset + program recall (midi_class): 0.1236
+
+Slakh test (pytorch)
+Drum onset F1 (flat): 0.6808                                                                                                                                                      
+Drum onset F1 (full): 0.6808                                                                                                                                                      
+Drum onset F1 (midi_class): 0.6808                                                                                                                                                
+Drum onset precision (flat): 0.7103                                                                                                                                               
+Drum onset precision (full): 0.7103                                                                                                                                               
+Drum onset precision (midi_class): 0.7103                                                                                                                                         
+Drum onset recall (flat): 0.6651                                                                                                                                                  
+Drum onset recall (full): 0.6651                                                                                                                                                  
+Drum onset recall (midi_class): 0.6651                                                                                                                                            
+Nondrum onset + offset + program F1 (flat): 0.4218                                                                                                                                
+Nondrum onset + offset + program F1 (full): 0.09942                                                                                                                               
+Nondrum onset + offset + program F1 (midi_class): 0.3847                                                                                                                          
+Nondrum onset + offset + program precision (flat): 0.4778                                                                                                                         
+Nondrum onset + offset + program precision (full): 0.1123                                                                                                                         
+Nondrum onset + offset + program precision (midi_class): 0.4354                                                                                                                   
+Nondrum onset + offset + program recall (flat): 0.3826                                                                                                                            
+Nondrum onset + offset + program recall (full): 0.09017                                                                                                                           
+Nondrum onset + offset + program recall (midi_class): 0.3492                                                                                                                      
+Onset + offset + program F1 (flat): 0.5037                                                                                                                                        
+Onset + offset + program F1 (full): 0.2846                                                                                                                                        
+Onset + offset + program F1 (midi_class): 0.4781                                                                                                                                  
+Onset + offset + program precision (flat): 0.5559                                                                                                                                 
+Onset + offset + program precision (full): 0.3138                                                                                                                                 
+Onset + offset + program precision (midi_class): 0.5273                                                                                                                           
+Onset + offset + program recall (flat): 0.4651                                                                                                                                    
+Onset + offset + program recall (full): 0.2626                                                                                                                                    
+Onset + offset + program recall (midi_class): 0.4415 
+
+Slakh test (official)
+Drum onset F1 (flat): 0.6789
+Drum onset F1 (full): 0.6789
+Drum onset F1 (midi_class): 0.6789
+Drum onset precision (flat): 0.7053
+Drum onset precision (full): 0.7053
+Drum onset precision (midi_class): 0.7053
+Drum onset recall (flat): 0.6662
+Drum onset recall (full): 0.6662
+Drum onset recall (midi_class): 0.6662
+Nondrum onset + offset + program F1 (flat): 0.4225
+Nondrum onset + offset + program F1 (full): 0.09958
+Nondrum onset + offset + program F1 (midi_class): 0.3856
+Nondrum onset + offset + program precision (flat): 0.4784
+Nondrum onset + offset + program precision (full): 0.1124
+Nondrum onset + offset + program precision (midi_class): 0.4362
+Nondrum onset + offset + program recall (flat): 0.3834
+Nondrum onset + offset + program recall (full): 0.09033
+Nondrum onset + offset + program recall (midi_class): 0.3501
+Onset + offset + program F1 (flat): 0.5039
+Onset + offset + program F1 (full): 0.2846
+Onset + offset + program F1 (midi_class): 0.4784
+Onset + offset + program precision (flat): 0.555
+Onset + offset + program precision (full): 0.3132
+Onset + offset + program precision (midi_class): 0.5266
+Onset + offset + program recall (flat): 0.4659
+Onset + offset + program recall (full): 0.2631
+Onset + offset + program recall (midi_class): 0.4425
+
+
+Instrument classification (from hidden state to actual generated output)
+- decoder[-1]: 0.83
+- decoder[0]: 0.82
+- decoder[1]: 0.81
+- encoder[-1]: 0.7
+
+clearly decoder is responsible for transcribing instruments from audio.

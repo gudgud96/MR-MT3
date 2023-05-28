@@ -11,6 +11,8 @@ import torch
 import librosa
 from contrib import spectrograms, vocabularies, note_sequences, metrics_utils
 import note_seq
+import matplotlib.pyplot as plt
+import traceback
 
 
 class InferenceHandler:
@@ -109,7 +111,8 @@ class InferenceHandler:
 
     # TODO Force generate using subset of instrument instead of all.
 
-    def inference(self, audio_path, outpath=None, valid_programs=None, num_beams=1):
+    @torch.no_grad()
+    def get_encoder_outputs(self, audio_path, valid_programs=None):
         audio, _ = librosa.load(audio_path, sr=self.SAMPLE_RATE)
         if valid_programs is not None:
             invalid_programs = self._get_program_ids(valid_programs)
@@ -119,18 +122,98 @@ class InferenceHandler:
         inputs_tensor = torch.from_numpy(inputs)
         results = []
         inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times)
-        for batch in tqdm(inputs_tensor):
+        for idx, batch in tqdm(enumerate(inputs_tensor), total=len(inputs_tensor)):
             batch = batch.to(self.device)
+            encoder_outputs = self.model.encoder(input_ids=batch)
+            hidden_states = encoder_outputs[0]
+            results.append(hidden_states)
+        
+        return torch.cat(results, dim=0)
+
+    @torch.no_grad()
+    def inference(self, audio, audio_path, outpath=None, valid_programs=None, num_beams=1):
+        try:
+            if valid_programs is not None:
+                invalid_programs = self._get_program_ids(valid_programs)
+            else:
+                invalid_programs = None
+            print('preprocessing', audio_path)
+            inputs, frame_times = self._preprocess(audio)
+            inputs_tensor = torch.from_numpy(inputs)
+            encoder_outputs = []
+            results = []
+            print('batching', audio_path)
+            inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times)
+            instruments = set()
+            print('inferencing', audio_path)
+            for idx, batch in tqdm(enumerate(inputs_tensor), total=len(inputs_tensor)):
+                batch = batch.to(self.device)
+                print("batch", batch)
+
+                model_output = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
+                                            length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, 
+                                            early_stopping=False, bad_words_ids=invalid_programs,
+                                            return_dict_in_generate=True, output_hidden_states=True)
+                
+                result = model_output.sequences
+                print('result', result.shape, len(model_output.encoder_hidden_states), len(model_output.decoder_hidden_states))
+
+                result = self._postprocess_batch(result)
+                single_event = self._to_event([result], [frame_times[idx]])
+
+                # play something easy first, instrument existence
+                instruments.update(set([note.program for note in single_event.notes if not note.is_drum]))
+
+                results.append(result)
+                break
+            
+            event = self._to_event(results, frame_times)
+            if outpath is None:
+                filename = audio_path.split('/')[-1].split('.')[0]
+                outpath = f'./out/{filename}.mid'
+            os.makedirs('/'.join(outpath.split('/')[:-1]), exist_ok=True)
+            note_seq.sequence_proto_to_midi_file(event, outpath)
+
+            return torch.cat(encoder_outputs, dim=0), instruments
+        
+        except Exception as e:
+            traceback.print_exc()
+
+    
+    def load_inputs_tensor(self, audio_path, valid_programs=None, num_beams=1):
+        print('loading', audio_path)
+        audio, _ = librosa.load(audio_path, sr=self.SAMPLE_RATE)
+        if valid_programs is not None:
+            invalid_programs = self._get_program_ids(valid_programs)
+        else:
+            invalid_programs = None
+        print('preprocessing', audio_path)
+        inputs, frame_times = self._preprocess(audio)
+        inputs_tensor = torch.from_numpy(inputs)
+        print('batching', audio_path)
+        inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times, batch_size=128)
+
+        return inputs_tensor, frame_times
+
+    @torch.no_grad()
+    def model_inference(self, inputs_tensor, frame_times, num_beams=1):
+        encoder_outputs = []
+        instruments = set()
+        for idx, batch in tqdm(enumerate(inputs_tensor), total=len(inputs_tensor)):
+            batch = batch.to(self.device)
+            enc_out = self.model.encoder(inputs_embeds=batch)
+            hidden_states = enc_out[0]
+            encoder_outputs.append(hidden_states)
+
             result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
-                                         length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, early_stopping=False, bad_words_ids=invalid_programs)
+                                         length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, early_stopping=False, bad_words_ids=None)
             result = self._postprocess_batch(result)
-            results.append(result)
-        event = self._to_event(results, frame_times)
-        if outpath is None:
-            filename = audio_path.split('/')[-1].split('.')[0]
-            outpath = f'./out/{filename}.mid'
-        os.makedirs('/'.join(outpath.split('/')[:-1]), exist_ok=True)
-        note_seq.sequence_proto_to_midi_file(event, outpath)
+            single_event = self._to_event([result], [frame_times[idx]])
+
+            # play something easy first, instrument existence
+            instruments.update(set([note.program for note in single_event.notes if not note.is_drum]))
+        
+        return torch.cat(encoder_outputs, dim=0), instruments
 
     def _postprocess_batch(self, result):
         after_eos = torch.cumsum(
@@ -147,6 +230,7 @@ class InferenceHandler:
         predictions = []
         for i, batch in enumerate(predictions_np):
             for j, tokens in enumerate(batch):
+                print("tokens")
                 tokens = tokens[:np.argmax(
                     tokens == vocabularies.DECODED_EOS_ID)]
                 start_time = frame_times[i][j][0]
