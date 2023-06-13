@@ -194,10 +194,13 @@ def decode_events(
     cur_steps = 0
     cur_time = start_time
     token_idx = 0
+    # print("decode event")
     for token_idx, token in enumerate(tokens):
         try:
             event = codec.decode_event_index(token)
+            # print('token', token, 'event', event)
         except ValueError:
+            # print('invalid token!', token)
             invalid_events += 1
             continue
         if event.type == 'shift':
@@ -211,6 +214,7 @@ def decode_events(
             try:
                 decode_event_fn(state, cur_time, event, codec)
             except ValueError:
+                # print('invalid token 2!', token)
                 invalid_events += 1
                 logging.info(
                     'Got invalid event when decoding event %s at time %f. '

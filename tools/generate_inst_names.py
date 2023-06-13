@@ -6,8 +6,10 @@ from contrib.preprocessor import _SLAKH_CLASS_PROGRAMS
 
 _SLAKH_CLASS_PROGRAMS
 
-def _find_inst_name(program_num):
+def _find_inst_name(is_drum, program_num):
     inst = None
+    if is_drum:
+        return "Drums"
     for i, (k, v) in enumerate(_SLAKH_CLASS_PROGRAMS.items()):
         if program_num >= v:
             inst = k
@@ -26,7 +28,10 @@ def main(root_path):
             for k in metadata['stems'].keys():
                 # print(k, metadata['stems'][k]['inst_class'])
                 if(metadata['stems'][k].get('integrated_loudness', None) is not None):
-                    inst_names[k] = _find_inst_name(metadata['stems'][k]['program_num'])
+                    inst_names[k] = _find_inst_name(
+                        metadata['stems'][k]['is_drum'],
+                        metadata['stems'][k]['program_num']
+                    )
             with open(inst_names_path, 'w') as w:
                 json.dump(inst_names, w)
     print('done')
@@ -34,4 +39,4 @@ def main(root_path):
 
 
 if __name__ == '__main__':
-    main('/mnt/2TB/dataset/midi/babyslakh_16k')
+    main('/data/slakh2100_flac_redux/train')

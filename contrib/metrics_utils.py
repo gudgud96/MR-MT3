@@ -128,6 +128,7 @@ def event_predictions_to_ns(
             codec=codec,
             decode_event_fn=encoding_spec.decode_event_fn),
         flush_state_fn=encoding_spec.flush_decoding_state_fn)
+    
 
     # Also concatenate raw inputs from all predictions.
     sorted_predictions = sorted(

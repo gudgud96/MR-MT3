@@ -1,12 +1,13 @@
-num_training_steps: 300_000
+num_epochs: 100
+warmup_steps: 1289
 
 data:
-  train_path: /mnt/2TB/dataset/midi/babyslakh_16k
-  test_path: /mnt/2TB/dataset/midi/babyslakh_16k
+  train_path: /data/slakh2100_flac_redux/train
+  test_path: /data/slakh2100_flac_redux/validation
   config:
     midi_folder: MIDI
     inst_filename: inst_names.json
-    audio_filename: mix.wav
+    audio_filename: mix_16k.wav
   # train_path: /home/kunato/mt3/temp_data
   # test_path: /home/kunato/mt3/temp_data
   # config:
@@ -20,7 +21,7 @@ pretrained: pretrained/mt3.pth
 
 lr: 2e-5
 
-per_device_batch_size: 8 # 64
+per_device_batch_size: 4 # 64
 gradient_clip_val: 0
 grad_accum: 1
 gpus: 1

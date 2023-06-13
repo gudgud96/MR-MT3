@@ -1,20 +1,22 @@
-import tensorflow as tf
-tf.config.set_visible_devices([], 'GPU')
+import torch
+from torch.utils.data import Dataset, DataLoader
+
+# import tensorflow as tf
+# tf.config.set_visible_devices([], 'GPU')
+
 from itertools import cycle
 import json
 import random
 from typing import Dict, List, Optional, Sequence, Tuple
-import torch
-from torch.utils.data import IterableDataset
 import numpy as np
 import librosa
 import note_seq
 from glob import glob
-from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding
+from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding, metrics_utils
 from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
 
 
-class MidiMixIterDataset(IterableDataset):
+class SlakhDataset(Dataset):
 
     def __init__(
         self, 
@@ -27,7 +29,8 @@ class MidiMixIterDataset(IterableDataset):
         onsets_only=False, 
         audio_filename='mix.flac', 
         midi_folder='MIDI', 
-        inst_filename='inst_names.json'
+        inst_filename='inst_names.json',
+        shuffle=True
     ) -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
@@ -39,7 +42,7 @@ class MidiMixIterDataset(IterableDataset):
         self.inst_filename = inst_filename
         self.mel_length = mel_length
         self.event_length = event_length
-        self.df = self._build_dataset(root_dir)
+        self.df = self._build_dataset(root_dir, shuffle=shuffle)
         self.is_train = is_train
         self.include_ties = include_ties
         self.ignore_pitch_bends = ignore_pitch_bends
@@ -48,7 +51,7 @@ class MidiMixIterDataset(IterableDataset):
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
-        audio_files = glob(f'{root_dir}/**/{self.audio_filename}')
+        audio_files = sorted(glob(f'{root_dir}/**/{self.audio_filename}'))
         print("root_dir", root_dir, len(audio_files))
         for a_f in audio_files:
             inst_path = a_f.replace(self.audio_filename, self.inst_filename)
@@ -124,6 +127,8 @@ class MidiMixIterDataset(IterableDataset):
         else:
             times, values = (
                 note_sequences.note_sequence_to_onsets_and_offsets_and_programs(ns))
+            # print('times', times)
+            # print('values', values)
 
         (events, event_start_indices, event_end_indices,
          state_events, state_event_indices) = (
@@ -138,6 +143,10 @@ class MidiMixIterDataset(IterableDataset):
                     note_sequences.note_encoding_state_to_events
                     if self.include_ties else None)))
 
+        # print('events', events)
+        # print('inputs', np.array(frames).shape)
+        # print('frame_times', frame_times.shape)
+        # print('targets', events.shape)
         return {
             'inputs': np.array(frames),
             'input_times': frame_times,
@@ -188,7 +197,9 @@ class MidiMixIterDataset(IterableDataset):
 
         current_state = np.zeros(
             len(state_change_event_ranges), dtype=np.int32)
-        for event in events:
+        for j, event in enumerate(events):
+            # if j <= 100:
+            #     print(j, event, self.codec.decode_event_index(event))
             if self.codec.is_shift_event_index(event):
                 shift_steps += 1
                 total_shift_steps += 1
@@ -211,9 +222,11 @@ class MidiMixIterDataset(IterableDataset):
                     while shift_steps > 0:
                         output_steps = np.minimum(
                             self.codec.max_shift_steps, shift_steps)
+                        # print("output_steps", output_steps)
                         output = np.concatenate(
                             [output, [output_steps]], axis=0)
                         shift_steps -= output_steps
+                    # print("shift_steps", shift_steps, total_shift_steps)
                 output = np.concatenate([output, [event]], axis=0)
 
         features[feature_key] = output
@@ -238,7 +251,7 @@ class MidiMixIterDataset(IterableDataset):
                 targets = torch.cat([targets, eos, pad], dim=0)
             else:
                 targets = torch.cat([targets, eos], dim=0)
-        return {'inputs': inputs, 'targets': targets}
+        return {'inputs': inputs, 'targets': targets, "input_times": row["input_times"]}
     
     def _split_frame(self, row, length=2000):
         rows = []
@@ -248,7 +261,7 @@ class MidiMixIterDataset(IterableDataset):
                 continue
             new_row = {}
             for k in row.keys():
-                if k in ['inputs', 'input_event_start_indices', 'input_event_end_indices', 'input_state_event_indices']:
+                if k in ['inputs', 'input_times', 'input_event_start_indices', 'input_event_end_indices', 'input_state_event_indices']:
                     new_row[k] = row[k][split:split+length]
                 else:
                     new_row[k] = row[k]
@@ -266,42 +279,122 @@ class MidiMixIterDataset(IterableDataset):
             return row
         start_length = random.randint(0, random_length)
         for k in row.keys():
-            if k in ['inputs', 'input_event_start_indices', 'input_event_end_indices', 'input_state_event_indices']:
+            if k in ['inputs', 'input_times', 'input_event_start_indices', 'input_event_end_indices', 'input_state_event_indices']:
                 new_row[k] = row[k][start_length:start_length+self.mel_length]
             else:
                 new_row[k] = row[k]
         return new_row
+    
+    def _to_event(self, predictions_np: List[np.ndarray], frame_times: np.ndarray):
+        predictions = []
+        for i, batch in enumerate(predictions_np):
+            for j, tokens in enumerate(batch):
+                # tokens = tokens[:np.argmax(
+                #     tokens == vocabularies.DECODED_EOS_ID)]
+                start_time = frame_times[i][j][0]
+                start_time -= start_time % (1 / self.codec.steps_per_second)
+                predictions.append({
+                    'est_tokens': tokens,
+                    'start_time': start_time,
+                    'raw_inputs': []
+                })
 
-    def process_data(self):
-        for idx in range(len(self.df)):
-            row = self.df[idx]
-            print(row['midi_path'], row['inst_names'])
-            note_sequences, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
-            audio, sr = librosa.load(row['audio_path'], sr=None)
-            if sr != self.spectrogram_config.sample_rate:
-                audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
-            row = self._tokenize(note_sequences, audio, inst_names)
-            rows = self._split_frame(row)
-            for row in rows:
-                row = self._random_chunk(row)
-                row = self._extract_target_sequence_with_indices(row, self.tie_token)
-                row = self._run_length_encode_shifts(row)
-                row = self._compute_spectrogram(row)
-                row = self._pad_length(row)
-                yield row
+        encoding_spec = note_sequences.NoteEncodingWithTiesSpec
+        result = metrics_utils.event_predictions_to_ns(
+            predictions, codec=self.codec, encoding_spec=encoding_spec)
+        return result['est_ns']
+    
+    def _postprocess_batch(self, result):
+        EOS_TOKEN_ID = 1    # TODO: this is a hack!
+        after_eos = torch.cumsum(
+            (result == EOS_TOKEN_ID).float(), dim=-1)
+        # minus special token
+        result = result - self.vocab.num_special_tokens()
+        result = torch.where(after_eos.bool(), -1, result)
+        # remove bos
+        result = result[:, 1:]
+        result = result.cpu().numpy()
+        return result
+    
+    def __getitem__(self, idx):
+        """
+        TODO: Should be good enough for training now. 
+        Although there is still one imperfection for reconstruction, 
+        which is the `start_time` for each segment seems to be wrong, hence holding the track back.
+        """
+        row = self.df[idx]
+        ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
+        audio, sr = librosa.load(row['audio_path'], sr=None)
+        if sr != self.spectrogram_config.sample_rate:
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
+        row = self._tokenize(ns, audio, inst_names)
+        rows = self._split_frame(row)
+        
+        inputs, targets, frame_times = [], [], []
+        num_rows = 8
+        if len(rows) > num_rows:
+            start_idx = random.randint(0, len(rows) - num_rows)
+            # start_idx = 0
+            rows = rows[start_idx : start_idx + num_rows]
+        
+        predictions = []
+        for j, row in enumerate(rows):
+            row = self._random_chunk(row)
+            row = self._extract_target_sequence_with_indices(row, self.tie_token)
+            row = self._run_length_encode_shifts(row)
+            row = self._compute_spectrogram(row)
+            row = self._pad_length(row)
+            inputs.append(row["inputs"])
+            targets.append(row["targets"])   
+
+            # ========== for reconstructing the MIDI from events =========== #
+            # print(j)
+            # print('est_tokens', row["targets"].shape)
             
-    def __iter__(self):
-        return cycle(self.process_data())
+            # result = row["targets"]
+            # EOS_TOKEN_ID = 1    # TODO: this is a hack!
+            # after_eos = torch.cumsum(
+            #     (result == EOS_TOKEN_ID).float(), dim=-1
+            # )
+            # result -= self.vocab.num_special_tokens()
+            # result = torch.where(after_eos.bool(), -1, result)
+
+            # print("start_times", row["input_times"][0])
+            # predictions.append({
+            #     'est_tokens': result.cpu().detach().numpy(),    # has to be numpy here, or else problematic
+            #     'start_time': row["input_times"][0],
+            #     'raw_inputs': []
+            # })
+             # ========== for reconstructing the MIDI from events =========== #
+        
+        # ========== for reconstructing the MIDI from events =========== #
+        # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
+        # result = metrics_utils.event_predictions_to_ns(
+        #     predictions, codec=self.codec, encoding_spec=encoding_spec)
+        # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
+        # ========== for reconstructing the MIDI from events =========== #  
+    
+        return torch.stack(inputs), torch.stack(targets)
+    
+    def __len__(self):
+        return len(self.df)
 
 
-
+def collate_fn(lst):
+    inputs = [k[0] for k in lst]
+    targets = [k[1] for k in lst]
+    return torch.cat(inputs), torch.cat(targets)
 
 if __name__ == '__main__':
-    from torch.utils.data import DataLoader
-    dataset = MidiMixIterDataset(root_dir='/home/kunato/mt3/temp_data')
-    loader = DataLoader(dataset, batch_size=3)
-    for i in range(3):
-        batch = next(iter(loader))
-        print(batch)
-        print([(k, batch[k].shape) for k in batch.keys()])
+    dataset = SlakhDataset(
+        root_dir='/data/slakh2100_flac_redux/test/',
+        shuffle=False,
+        is_train=False,
+        include_ties=True
+    )
+    dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
+    for idx, item in enumerate(dl):
+        inputs, targets = item
+        print(idx, inputs.shape, targets.shape)
+        break
     

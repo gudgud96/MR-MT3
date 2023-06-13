@@ -127,7 +127,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         ```"""
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        
         # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
         if head_mask is not None and decoder_head_mask is None:
             if self.config.num_layers == self.config.num_decoder_layers:
@@ -196,7 +196,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         if not return_dict:
             output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
             return ((loss,) + output) if loss is not None else output
-
+        
         return Seq2SeqLMOutput(
             loss=loss,
             logits=lm_logits,
@@ -208,6 +208,46 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             encoder_hidden_states=encoder_outputs.hidden_states,
             encoder_attentions=encoder_outputs.attentions,
         )
+    
+    def forward_test(
+        self,
+        inputs: Optional[torch.FloatTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        decoder_attention_mask: Optional[torch.BoolTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        decoder_head_mask: Optional[torch.FloatTensor] = None,
+        cross_attn_head_mask: Optional[torch.Tensor] = None,
+        encoder_outputs: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ):
+        out = self.forward(
+            inputs=inputs,
+            attention_mask=attention_mask,
+            decoder_input_ids=decoder_input_ids,
+            decoder_attention_mask=decoder_attention_mask,
+            head_mask=head_mask,
+            decoder_head_mask=decoder_head_mask,
+            cross_attn_head_mask=cross_attn_head_mask,
+            encoder_outputs=encoder_outputs,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            decoder_inputs_embeds=decoder_inputs_embeds,
+            labels=labels,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        return out.logits, out.decoder_hidden_states, out.encoder_hidden_states
 
     def prepare_inputs_for_generation(
         self,
@@ -324,8 +364,10 @@ class T5Stack(T5PreTrainedModel):
                 f"You cannot specify both {err_msg_prefix}input_ids and {err_msg_prefix}inputs_embeds at the same time"
             )
         elif inputs_embeds is not None:
+            # print("t5stack inputs_embeds", self.is_decoder, inputs_embeds.shape)
             input_shape = inputs_embeds.size()[:-1]
         elif input_ids is not None:
+            # print("t5stack input_ids", self.is_decoder, input_ids.shape)
             input_shape = input_ids.size()[:2]
 
         if inputs_embeds is None:

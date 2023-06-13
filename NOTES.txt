@@ -55,6 +55,42 @@ Onset + offset + program precision (midi_class): 0.5273
 Onset + offset + program recall (flat): 0.4651                                                                                                                                    
 Onset + offset + program recall (full): 0.2626                                                                                                                                    
 Onset + offset + program recall (midi_class): 0.4415 
+Onset F1: 0.6656
+Onset precision: 0.7349
+Onset recall: 0.6142
+
+========================
+(Thanks to Yun-Ning Hung, the key lies in isses of all_src.mid in Slakh!)
+Drum onset F1 (flat): 0.7687
+Drum onset F1 (full): 0.7687
+Drum onset F1 (midi_class): 0.7687
+Drum onset precision (flat): 0.8036
+Drum onset precision (full): 0.8036
+Drum onset precision (midi_class): 0.8036
+Drum onset recall (flat): 0.7501
+Drum onset recall (full): 0.7501
+Drum onset recall (midi_class): 0.7501
+Nondrum onset + offset + program F1 (flat): 0.5256
+Nondrum onset + offset + program F1 (full): 0.1494
+Nondrum onset + offset + program F1 (midi_class): 0.4957
+Nondrum onset + offset + program precision (flat): 0.5808
+Nondrum onset + offset + program precision (full): 0.1656
+Nondrum onset + offset + program precision (midi_class): 0.5475
+Nondrum onset + offset + program recall (flat): 0.4844
+Nondrum onset + offset + program recall (full): 0.1373
+Nondrum onset + offset + program recall (midi_class): 0.457
+Onset + offset + program F1 (flat): 0.6
+Onset + offset + program F1 (full): 0.3484
+Onset + offset + program F1 (midi_class): 0.5797
+Onset + offset + program precision (flat): 0.6527
+Onset + offset + program precision (full): 0.3791
+Onset + offset + program precision (midi_class): 0.6304
+Onset + offset + program recall (flat): 0.5598
+Onset + offset + program recall (full): 0.3247
+Onset + offset + program recall (midi_class): 0.541
+Onset F1: 0.7595
+Onset precision: 0.8271
+Onset recall: 0.7079
 
 Slakh test (official)
 Drum onset F1 (flat): 0.6789
@@ -85,6 +121,51 @@ Onset + offset + program recall (flat): 0.4659
 Onset + offset + program recall (full): 0.2631
 Onset + offset + program recall (midi_class): 0.4425
 
+Perceiver style (onset-F1 and onset-multi-instrument-F1):
+Drum onset F1 (midi_class): 0.6808
+Drum onset precision (midi_class): 0.7103
+Drum onset recall (midi_class): 0.6651
+Nondrum onset + offset + program F1 (midi_class): 0.5908
+Nondrum onset + offset + program precision (midi_class): 0.6675
+Nondrum onset + offset + program recall (midi_class): 0.5366
+Onset + offset + program F1 (midi_class): 0.6208
+Onset + offset + program precision (midi_class): 0.6847
+Onset + offset + program recall (midi_class): 0.5733
+Onset F1: 0.6656
+Onset precision: 0.7349
+Onset recall: 0.6142
+
+========================
+(Thanks to Yun-Ning Hung, the key lies in isses of all_src.mid in Slakh!)
+Perceiver style (onset-F1 and onset-multi-instrument-F1, revised):
+Drum onset F1 (midi_class): 0.7687
+Drum onset precision (midi_class): 0.8036
+Drum onset recall (midi_class): 0.7501
+Nondrum onset + offset + program F1 (midi_class): 0.7139
+Nondrum onset + offset + program precision (midi_class): 0.789
+Nondrum onset + offset + program recall (midi_class): 0.6577
+Onset + offset + program F1 (midi_class): 0.7296
+Onset + offset + program precision (midi_class): 0.7941
+Onset + offset + program recall (midi_class): 0.6803
+Onset F1: 0.7595
+Onset precision: 0.8271
+Onset recall: 0.7079
+
+
+Perceiver style on loop data:
+Drum onset F1 (midi_class): 0.0
+Drum onset precision (midi_class): 0.0
+Drum onset recall (midi_class): 0.0
+Nondrum onset + offset + program F1 (midi_class): 0.2104
+Nondrum onset + offset + program precision (midi_class): 0.2097
+Nondrum onset + offset + program recall (midi_class): 0.2263
+Onset + offset + program F1 (midi_class): 0.2023
+Onset + offset + program precision (midi_class): 0.1983
+Onset + offset + program recall (midi_class): 0.2263
+Onset F1: 0.3989
+Onset precision: 0.4033
+Onset recall: 0.4504
+
 
 Instrument classification (from hidden state to actual generated output)
 - decoder[-1]: 0.83
@@ -93,3 +174,46 @@ Instrument classification (from hidden state to actual generated output)
 - encoder[-1]: 0.7
 
 clearly decoder is responsible for transcribing instruments from audio.
+
+
+slakh2100_flac_redux_test_16k_orig|compute_transcription_metrics
+on_f1: 0.6656
+on_overlap: 0.5312
+on_precision: 0.7349
+on_recall: 0.6142
+onoff_f1: 0.4235
+onoff_overlap: 0.7351
+onoff_precision: 0.4672
+onoff_recall: 0.3912
+
+why ownself train version transcription no drums??? that is weird.
+Drum onset F1 (flat): 0.02438
+Drum onset F1 (full): 0.02438
+Drum onset F1 (midi_class): 0.02438
+Drum onset precision (flat): 0.7059
+Drum onset precision (full): 0.7059
+Drum onset precision (midi_class): 0.7059
+Drum onset recall (flat): 0.01325
+Drum onset recall (full): 0.01325
+Drum onset recall (midi_class): 0.01325
+Nondrum onset + offset + program F1 (flat): 0.3413
+Nondrum onset + offset + program F1 (full): 0.08837
+Nondrum onset + offset + program F1 (midi_class): 0.3093
+Nondrum onset + offset + program precision (flat): 0.3209
+Nondrum onset + offset + program precision (full): 0.08305
+Nondrum onset + offset + program precision (midi_class): 0.2904
+Nondrum onset + offset + program recall (flat): 0.372
+Nondrum onset + offset + program recall (full): 0.0964
+Nondrum onset + offset + program recall (midi_class): 0.3375
+Onset + offset + program F1 (flat): 0.2879
+Onset + offset + program F1 (full): 0.07846
+Onset + offset + program F1 (midi_class): 0.2612
+Onset + offset + program precision (flat): 0.3238
+Onset + offset + program precision (full): 0.08737
+Onset + offset + program precision (midi_class): 0.2935
+Onset + offset + program recall (flat): 0.2625
+Onset + offset + program recall (full): 0.07188
+Onset + offset + program recall (midi_class): 0.2382
+Onset F1: 0.6181
+Onset precision: 0.6956
+Onset recall: 0.5628
