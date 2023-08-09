@@ -15,6 +15,8 @@ from glob import glob
 from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding, metrics_utils
 from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
 
+MIN_LOG_MEL = -12
+MAX_LOG_MEL = 5
 
 class SlakhDataset(Dataset):
 
@@ -52,7 +54,7 @@ class SlakhDataset(Dataset):
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
         audio_files = sorted(glob(f'{root_dir}/**/{self.audio_filename}'))
-        print("root_dir", root_dir, len(audio_files))
+        print("root_dir", root_dir, len(audio_files), self.audio_filename)
         for a_f in audio_files:
             inst_path = a_f.replace(self.audio_filename, self.inst_filename)
             midi_path = a_f.replace(self.audio_filename, self.midi_folder)
@@ -235,6 +237,9 @@ class SlakhDataset(Dataset):
     def _compute_spectrogram(self, ex):
         samples = spectrograms.flatten_frames(ex['inputs'])
         ex['inputs'] = torch.from_numpy(np.array(spectrograms.compute_spectrogram(samples, self.spectrogram_config)))
+        # add normalization
+        ex['inputs'] = torch.clamp(ex['inputs'], min=MIN_LOG_MEL, max=MAX_LOG_MEL)
+        ex['inputs'] = (ex['inputs'] - MIN_LOG_MEL) / (MAX_LOG_MEL - MIN_LOG_MEL)
         return ex
 
     def _pad_length(self, row):
@@ -373,7 +378,6 @@ class SlakhDataset(Dataset):
         #     predictions, codec=self.codec, encoding_spec=encoding_spec)
         # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
         # ========== for reconstructing the MIDI from events =========== #  
-    
         return torch.stack(inputs), torch.stack(targets)
     
     def __len__(self):
@@ -392,9 +396,14 @@ if __name__ == '__main__':
         is_train=False,
         include_ties=True
     )
-    dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
-    for idx, item in enumerate(dl):
-        inputs, targets = item
-        print(idx, inputs.shape, targets.shape)
-        break
+    print("pitch", dataset.codec.event_type_range("pitch"))
+    print("velocity", dataset.codec.event_type_range("velocity"))
+    print("tie", dataset.codec.event_type_range("tie"))
+    print("program", dataset.codec.event_type_range("program"))
+    print("drum", dataset.codec.event_type_range("drum"))
+    # dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
+    # for idx, item in enumerate(dl):
+    #     inputs, targets = item
+    #     print(idx, inputs.shape, targets.shape)
+    #     break
     

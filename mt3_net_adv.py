@@ -25,7 +25,7 @@ import mlflow
 import datetime
 
 
-class MT3Net(pl.LightningModule):
+class MT3NetAdversarial(pl.LightningModule):
 
     def __init__(self, config, model_config_path='config/mt3_config.json', result_dir='./results'):
         super().__init__()
@@ -42,12 +42,27 @@ class MT3Net(pl.LightningModule):
 
     def forward(self, *args, **kwargs):
         return self.model.forward(*args, **kwargs)
+    
+    def fgsm(self, inputs, labels, epsilon=0.05):
+        delta = torch.zeros_like(inputs, requires_grad=True)
+        lm_logits, _, _ = self.model.get_model_outputs(inputs=inputs+delta, labels=labels)
+        loss = nn.CrossEntropyLoss(ignore_index=-100)(
+            lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1)
+        )
+        loss.backward()
+        return epsilon * delta.grad.detach().sign()
 
     def training_step(self, batch, batch_idx):
         inputs, targets = batch
-        outputs = self.forward(inputs=inputs, labels=targets)
+
+        # run adversarial attack
+        delta = self.fgsm(inputs=inputs, labels=targets, epsilon=0.05)
+
+        # run forward
+        outputs = self.model.forward(inputs=inputs + delta, labels=targets)
         self.log('train_loss', outputs.loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         mlflow.log_metric("train_loss", outputs.loss)
+
         return outputs.loss
     
     # def training_epoch_end(self, outputs):
@@ -57,7 +72,7 @@ class MT3Net(pl.LightningModule):
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
         inputs, targets = batch
-        outputs = self.forward(inputs=inputs, labels=targets)
+        outputs = self.model.forward(inputs=inputs, labels=targets)
         self.log('val_loss', outputs.loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         mlflow.log_metric("val_loss", outputs.loss)
         return outputs.loss
@@ -71,19 +86,11 @@ class MT3Net(pl.LightningModule):
         warmup_step = int(self.config.warmup_steps)
         print('warmup step: ', warmup_step)
         schedule = {
-            'scheduler': get_cosine_schedule_with_warmup(
-                optimizer=optimizer, 
-                num_warmup_steps=warmup_step, 
-                num_training_steps=1289*self.config.num_epochs,
-                min_lr=2.5e-5
-            ),
+            'scheduler': get_cosine_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=warmup_step, num_training_steps=1289*self.config.num_epochs),
             'interval': 'step',
             'frequency': 1
         }
         return [optimizer], [schedule]
-
-        # we follow MT3 to use fixed learning rate
-        # return AdamW(self.model.parameters(), self.config.lr)
 
     def train_dataloader(self):
         train_path = self.config.data.train_path
@@ -111,7 +118,7 @@ class MT3Net(pl.LightningModule):
 
 
 def main(config, model_config, result_dir, mode, path):
-    model = MT3Net(config, model_config, result_dir)
+    model = MT3NetAdversarial(config, model_config, result_dir)
     logger = TensorBoardLogger(save_dir='/'.join(result_dir.split('/')[:-1]),
                                name=result_dir.split('/')[-1])
 
@@ -138,12 +145,12 @@ def main(config, model_config, result_dir, mode, path):
             accelerator='gpu',
             accumulate_grad_batches=config.grad_accum,
             num_sanity_val_steps=2,
-            log_every_n_steps=645
+            log_every_n_steps=100
         )
         trainer.fit(model)
-
+    
     else:
-        model = MT3Net.load_from_checkpoint(
+        model = MT3NetAdversarial.load_from_checkpoint(
             path,
             config=config,
             model_config=model_config,
@@ -168,11 +175,11 @@ if __name__ == "__main__":
     conf_file = 'config/config.yaml'
     model_config = 'config/mt3_config.json'
     print(f'Config {conf_file}')
-    conf = OmegaConf.load(conf_file)
-    
+
     datetime_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    result_dir = get_result_dir(f"results_norm_{datetime_str}")
+    conf = OmegaConf.load(conf_file)
+    result_dir = get_result_dir(f"results_adv_{datetime_str}")
     print('Creating: ', result_dir)
     os.makedirs(result_dir, exist_ok=False)
     shutil.copy(conf_file, f'{result_dir}/config.yaml')
