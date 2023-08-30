@@ -9,7 +9,8 @@ from pytorch_lightning.callbacks import TQDMProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger
 from transformers import T5Config
 from dataset.dataset import MidiMixIterDataset
-from dataset.dataset_2 import SlakhDataset, collate_fn
+# from dataset.dataset_2 import SlakhDataset, collate_fn
+from dataset.dataset_2_random import SlakhDataset, collate_fn
 from torch.utils.data import DataLoader
 from models.t5 import T5ForConditionalGeneration
 import torch.nn as nn
@@ -75,7 +76,7 @@ class MT3Net(pl.LightningModule):
                 optimizer=optimizer, 
                 num_warmup_steps=warmup_step, 
                 num_training_steps=1289*self.config.num_epochs,
-                min_lr=2.5e-5
+                min_lr=5e-5
             ),
             'interval': 'step',
             'frequency': 1
@@ -166,14 +167,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     conf_file = 'config/config.yaml'
-    model_config = 'config/mt3_config.json'
+    # model_config = 'config/mt3_config.json'
+    model_config = 'config/mt3_config_v2.json'
     print(f'Config {conf_file}')
     conf = OmegaConf.load(conf_file)
     
-    datetime_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    result_dir = get_result_dir(f"results_norm_{datetime_str}")
-    print('Creating: ', result_dir)
-    os.makedirs(result_dir, exist_ok=False)
-    shutil.copy(conf_file, f'{result_dir}/config.yaml')
+    result_dir = ""
+    if args.mode == "train":
+        datetime_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_dir = f"logs/results_norm_randomorder_{datetime_str}"
+        print('Creating: ', result_dir)
+        os.makedirs(result_dir, exist_ok=False)
+        shutil.copy(conf_file, f'{result_dir}/config.yaml')
+    
     main(conf, model_config, result_dir, args.mode, args.path)

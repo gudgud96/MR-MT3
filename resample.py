@@ -19,17 +19,20 @@ def func(fname):
         "PCM_24"
     )
 
-dir = sorted(glob.glob("/data/slakh2100_flac_redux/test/**/mix.flac"))
-pbar = tqdm(total=len(dir))
+for item in ["train", "validation", "test"]:
+    print(f"Settling {item}..")
+    dir = sorted(glob.glob(f"/data/slakh2100_flac_redux/{item}/**/mix.flac"))
+    pbar = tqdm(total=len(dir))
 
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
-    # Start the load operations and mark each future with its URL
-    future_to_fname = {executor.submit(func, fname): fname for fname in dir}
-    for future in concurrent.futures.as_completed(future_to_fname):
-        try:
-            fname = future_to_fname[future]
-            audio = future.result()
-            pbar.update()
-        except Exception as e:
-            traceback.print_exc()    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+        # Start the load operations and mark each future with its URL
+        future_to_fname = {executor.submit(func, fname): fname for fname in dir}
+        for future in concurrent.futures.as_completed(future_to_fname):
+            try:
+                fname = future_to_fname[future]
+                audio = future.result()
+                pbar.update()
+            except Exception as e:
+                traceback.print_exc()    
+    print("Done.")

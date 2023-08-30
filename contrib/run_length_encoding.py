@@ -58,6 +58,26 @@ class EventEncodingSpec:
     flush_decoding_state_fn: Callable[[DecodingState], DecodeResult]
 
 
+def get_token_name(token_idx):
+    token_idx = int(token_idx)
+    if token_idx >= 1001 and token_idx <= 1128:
+        token = f"pitch_{token_idx - 1001}"
+    elif token_idx >= 1129 and token_idx <= 1130:
+        token = f"velocity_{token_idx - 1129}"
+    elif token_idx >= 1131 and token_idx <= 1131:
+        token = "tie"
+    elif token_idx >= 1132 and token_idx <= 1259:
+        token = f"program_{token_idx - 1132}"
+    elif token_idx >= 1260 and token_idx <= 1387:
+        token = f"drum_{token_idx - 1260}"
+    elif token_idx >= 0 and token_idx < 1000:
+        token = f"shift_{token_idx}"
+    else:
+        token = f"invalid_{token_idx}"
+    
+    return token
+
+
 def encode_and_index_events(
     state: ES,
     event_times: Sequence[float],
@@ -136,8 +156,10 @@ def encode_and_index_events(
             # Dump state to state events *before* processing the next event, because
             # we want to capture the state prior to the occurrence of the event.
             for e in encoding_state_to_events_fn(state):
+                # print('* event_step', event_step, 'event_value', event_value, 'codec', e, codec.encode_event(e))
                 state_events.append(codec.encode_event(e))
         for e in encode_event_fn(state, event_value, codec):
+            # print('event_step', event_step, 'event_value', event_value, 'codec', e, codec.encode_event(e))
             events.append(codec.encode_event(e))
 
     # After the last event, continue filling out the event_start_indices array.
@@ -160,6 +182,8 @@ def encode_and_index_events(
     event_start_indices = np.array(event_start_indices)
     event_end_indices = np.array(event_end_indices)
     state_event_indices = np.array(state_event_indices)
+
+    # print('events', [get_token_name(k) for k in events])
 
     return (events, event_start_indices, event_end_indices,
             state_events, state_event_indices)

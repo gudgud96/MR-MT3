@@ -2,6 +2,7 @@ import json
 import math
 import os
 from typing import List
+import pickle
 
 import numpy as np
 from tqdm import tqdm
@@ -13,13 +14,17 @@ from contrib import spectrograms, vocabularies, note_sequences, metrics_utils
 import note_seq
 import matplotlib.pyplot as plt
 import traceback
+import zlib
+
+
+MIN_LOG_MEL = -12
+MAX_LOG_MEL = 5
 
 
 class InferenceHandler:
 
-    def __init__(self, weight_path, device=torch.device('cuda')) -> None:
-        config_path = f'{weight_path}/config.json'
-        weight_path = f'{weight_path}/mt3.pth'
+    def __init__(self, root_path, weight_path, device=torch.device('cuda')) -> None:
+        config_path = f'{root_path}/config.json'
         with open(config_path) as f:
             config_dict = json.load(f)
         config = T5Config.from_dict(config_dict)
@@ -33,6 +38,7 @@ class InferenceHandler:
             num_velocity_bins=1))
         self.vocab = vocabularies.vocabulary_from_codec(self.codec)
         self.device = device
+        print("device", self.device)
         self.model = model
         self.model.to(self.device)
 
@@ -42,6 +48,7 @@ class InferenceHandler:
         frame_size = spectrogram_config.hop_width
         padding = [0, frame_size - len(audio) % frame_size]
         audio = np.pad(audio, padding, mode='constant')
+        print('audio', audio.shape, 'frame_size', frame_size)
         frames = spectrograms.split_audio(audio, spectrogram_config)
         num_frames = len(audio) // frame_size
         times = np.arange(num_frames) / \
@@ -78,7 +85,13 @@ class InferenceHandler:
             raw_i = samples
             outputs.append(i)
             outputs_raws.append(raw_i)
-        return np.stack(outputs, axis=0), np.stack(outputs_raws, axis=0)
+        
+        melspec, raw = np.stack(outputs, axis=0), np.stack(outputs_raws, axis=0)
+
+        # add normalization
+        melspec = np.clip(melspec, MIN_LOG_MEL, MAX_LOG_MEL)
+        melspec = (melspec - MIN_LOG_MEL) / (MAX_LOG_MEL - MIN_LOG_MEL)
+        return melspec, raw
 
     def _preprocess(self, audio):
         frames, frame_times = self._audio_to_frames(audio)
@@ -140,39 +153,92 @@ class InferenceHandler:
             # print('preprocessing', audio_path)
             inputs, frame_times = self._preprocess(audio)
             inputs_tensor = torch.from_numpy(inputs)
-            encoder_outputs = []
+            saved_outputs = []
             results = []
             # print('batching', audio_path)
             inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times, batch_size=batch_size)
             instruments = set()
-            # print('inferencing', audio_path)
+            print('inferencing', audio_path)
+
+            seqs, decs = [], []
+            self.model.cuda()
             for idx, batch in enumerate(inputs_tensor):
                 batch = batch.to(self.device)
 
-                model_output = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
+                result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
                                             length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, 
                                             early_stopping=False, bad_words_ids=invalid_programs,
-                                            return_dict_in_generate=True, output_hidden_states=True)
+                                            use_cache=True,
+                                            # return_dict_in_generate=True, 
+                                            # output_hidden_states=True,
+                                            # output_attentions=True
+                                            )
                 
-                result = model_output.sequences
+                # print('hidden', len(model_output.encoder_hidden_states), len(model_output.decoder_hidden_states))
+                # print('attention', len(model_output.encoder_attentions), len(model_output.decoder_attentions))
+                # result = model_output.sequences
                 # result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
                 #                          length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, early_stopping=False, bad_words_ids=invalid_programs)
 
                 result = self._postprocess_batch(result)
-                single_event = self._to_event([result], [frame_times[idx]])
+                # single_event = self._to_event([result], [frame_times[idx]])
 
                 # play something easy first, instrument existence
-                instruments.update(set([note.program for note in single_event.notes if not note.is_drum]))
+                # instruments.update(set([note.program for note in single_event.notes if not note.is_drum]))
 
                 results.append(result)
+
+                # dec = torch.stack([torch.stack(k) for k in model_output.decoder_hidden_states])[:, -1, :, :, :].squeeze()
+                # dec = torch.permute(dec, (1, 0, 2))
+
+                # enc = []
+                # for hid in model_output.encoder_hidden_states:
+                #     tmp = hid.cpu().detach()
+                #     enc.append(tmp)
+                # enc = torch.stack(enc).squeeze()
+                # # enc = torch.mean(enc, dim=2)    # to save space
+                # enc = enc.numpy()
+                
+                # dec = []
+                # for hid in model_output.decoder_hidden_states:
+                #     tmp = torch.stack(hid).squeeze()
+                #     tmp = tmp.cpu().detach()
+                #     dec.append(tmp)
+                # dec = torch.stack(dec).squeeze()
+                # dec = torch.permute(dec, (1, 2, 0, 3))
+                # # dec = torch.mean(dec, dim=2)    # to save space
+                # dec = dec.numpy()
+
+                # print(enc.shape, dec.shape)
+
+                # seqs.append(result)
+                # decs.append(dec.cpu().detach().numpy())
+
+                # saved = {
+                #     "input": batch.cpu().detach().numpy(),
+                #     "output": model_output,
+                #     "event": single_event
+                # }
+                # saved_outputs.append(saved)
             
             event = self._to_event(results, frame_times)
             if outpath is None:
                 filename = audio_path.split('/')[-1].split('.')[0]
                 outpath = f'./out/{filename}.mid'
             os.makedirs('/'.join(outpath.split('/')[:-1]), exist_ok=True)
-            # print("saving", outpath)
+            print("saving", outpath)
             note_seq.sequence_proto_to_midi_file(event, outpath)
+
+            # seqs = np.concatenate(seqs, axis=1)
+            # decs = np.concatenate(decs, axis=1)
+
+            # print('seqss', seqs.shape, decs.shape)
+
+            # np.save(outpath.replace("mix.mid", "seqs.npy"), seqs)
+            # np.save(outpath.replace("mix.mid", "decs.npy"), decs)
+
+            # with open(outpath.replace("mid", "pickle"), 'wb') as f:
+            #     pickle.dump(saved_outputs, f, protocol=pickle.HIGHEST_PROTOCOL)
         
         except Exception as e:
             traceback.print_exc()

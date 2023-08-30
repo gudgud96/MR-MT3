@@ -3,6 +3,10 @@ import glob
 import os
 from tqdm import tqdm
 
+"""
+Use this for evaluation!!!
+"""
+
 midis = sorted(glob.glob("/data/slakh2100_flac_redux/test/*/MIDI/"))
 for midi in tqdm(midis):
     stems = sorted(glob.glob(midi + "*.mid"))

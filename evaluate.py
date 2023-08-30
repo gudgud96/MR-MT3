@@ -367,9 +367,13 @@ from tqdm import tqdm
 # dir2 = [k.replace("loops_data", "loops_out") for k in dir]
 
 # Slakh
-dir = sorted(glob.glob("/data/slakh2100_flac_redux/test/*/all_src_v2.mid"))
-dir2 = [k.replace("/data/slakh2100_flac_redux/test/", "slakh2100_flac_redux_test_16k_retrain/").replace("/all_src_v2.mid", "/mix.mid") for k in dir]
-fnames =  zip(dir, dir2)
+fname = "slakh_recon_randomorder"
+# fname = "slakh_recon_norm_v2_0.5964"
+
+dir = sorted(glob.glob(f"{fname}/*/mix.mid"))    # TODO: this is just for fast evaluation
+# dir = dir[:1]
+dir2 = [k.replace(f"{fname}/", "/data/slakh2100_flac_redux/test/").replace("/mix.mid", "/all_src_v2.mid") for k in dir]
+fnames = zip(dir2, dir)
 
 
 def func(item):

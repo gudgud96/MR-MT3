@@ -204,7 +204,6 @@ class SlakhDataset(Dataset):
         current_state = np.zeros(
             len(state_change_event_ranges), dtype=np.int32)
         for j, event in enumerate(events):
-            print(j, event)
             if self.codec.is_shift_event_index(event):
                 shift_steps += 1
                 total_shift_steps += 1
@@ -213,14 +212,14 @@ class SlakhDataset(Dataset):
                 # state, we can skip it entirely.
 
                 # NOTE: what if we don't remove redundant tokens?
-                is_redundant = False
-                for i, (min_index, max_index) in enumerate(state_change_event_ranges):
-                    if (min_index <= event) and (event <= max_index):
-                        if current_state[i] == event:
-                            is_redundant = True
-                        current_state[i] = event
-                if is_redundant:
-                    continue
+                # is_redundant = False
+                # for i, (min_index, max_index) in enumerate(state_change_event_ranges):
+                #     if (min_index <= event) and (event <= max_index):
+                #         if current_state[i] == event:
+                #             is_redundant = True
+                #         current_state[i] = event
+                # if is_redundant:
+                #     continue
 
                 # Once we've reached a non-shift event, RLE all previous shift events
                 # before outputting the non-shift event.
@@ -236,6 +235,38 @@ class SlakhDataset(Dataset):
 
         features[feature_key] = output
         return features
+    
+    def _remove_redundant_tokens(
+        self,
+        events,
+        state_change_event_types=['velocity', 'program'],
+    ):
+        state_change_event_ranges = [self.codec.event_type_range(event_type)
+                                     for event_type in state_change_event_types]
+
+        output = []
+
+        current_state = np.zeros(
+            len(state_change_event_ranges), dtype=np.int32)
+        for j, event in enumerate(events):
+            # If this event is a state change and has the same value as the current
+            # state, we can skip it entirely.
+
+            # NOTE: what if we don't remove redundant tokens?
+            is_redundant = False
+            for i, (min_index, max_index) in enumerate(state_change_event_ranges):
+                if (min_index <= event) and (event <= max_index):
+                    if current_state[i] == event:
+                        is_redundant = True
+                    current_state[i] = event
+            if is_redundant:
+                continue
+
+            # Once we've reached a non-shift event, RLE all previous shift events
+            # before outputting the non-shift event.
+            output = np.concatenate([output, [event]], axis=0)
+
+        return output
 
     def _compute_spectrogram(self, ex):
         samples = spectrograms.flatten_frames(ex['inputs'])
@@ -368,13 +399,18 @@ class SlakhDataset(Dataset):
             # inst_vec[inst_tokens] = 1
             # num_insts.append(inst_vec)
 
+            # -- random order augmentation --
+            # print("=======")
             # print(j, [self.get_token_name(t) for t in row["targets"]])
+            t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
+            t = np.array([self.token_to_idx(k) for k in t])
+            t = self._remove_redundant_tokens(t)
+            # print(j, [self.get_token_name(token) for token in t])
+            row["targets"] = t
             
             row = self._pad_length(row)
             inputs.append(row["inputs"])
             targets.append(row["targets"])   
-
-            # print('inputs', row["inputs"].shape)
 
             # ========== for reconstructing the MIDI from events =========== #
             # result = row["targets"]
@@ -418,6 +454,41 @@ class SlakhDataset(Dataset):
     def __len__(self):
         return len(self.df)
     
+    def randomize_tokens(self, token_lst):
+        shift_idx = [i for i in range(len(token_lst)) if "shift" in token_lst[i]]
+        if len(shift_idx) == 0:
+            return token_lst
+        res = token_lst[:shift_idx[0]]
+        for j in range(len(shift_idx) - 1):
+            res += [token_lst[shift_idx[j]]]
+            
+            start_idx = shift_idx[j]
+            end_idx = shift_idx[j + 1]
+            cur = token_lst[start_idx + 1 : end_idx]
+            cur_lst = []
+            ptr = 0
+            while ptr < len(cur):
+                t = cur[ptr]
+                if "program" in t:
+                    cur_lst.append([cur[ptr], cur[ptr + 1], cur[ptr + 2]])
+                    ptr += 3
+                elif "velocity" in t:
+                    cur_lst.append([cur[ptr], cur[ptr + 1]])
+                    ptr += 2
+
+            indices = np.arange(len(cur_lst))
+            np.random.shuffle(indices)
+
+            new_cur_lst = []
+            for idx in indices:
+                new_cur_lst.append(cur_lst[idx])
+            
+            new_cur_lst = [item for sublist in new_cur_lst for item in sublist]
+            res += new_cur_lst
+        
+        res += token_lst[shift_idx[-1]:]
+        return res
+    
     def get_token_name(self, token_idx):
         token_idx = int(token_idx)
         if token_idx >= 1001 and token_idx <= 1128:
@@ -436,6 +507,22 @@ class SlakhDataset(Dataset):
             token = f"invalid_{token_idx}"
         
         return token
+    
+    def token_to_idx(self, token_str):
+        if "pitch" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1001
+        elif "velocity" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1129
+        elif "tie" in token_str:
+            token_idx = 1131
+        elif "program" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1132
+        elif "drum" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1260
+        elif "shift" in token_str:
+            token_idx = int(token_str.split("_")[1])
+
+        return token_idx
 
 
 def collate_fn(lst):

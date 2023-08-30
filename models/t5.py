@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Optional, Tuple, Union
+from dataclasses import dataclass
 from transformers import T5Config, T5PreTrainedModel
 from transformers.models.t5.modeling_t5 import Seq2SeqLMOutput, BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions, checkpoint, T5LayerNorm, T5Block
 from transformers.utils import logging
@@ -26,6 +27,11 @@ from tqdm import tqdm
 
 
 logger = logging.get_logger(__name__)
+
+
+@dataclass
+class Seq2SeqLMOutputNumInsts(Seq2SeqLMOutput):
+    loss_inst: Optional[torch.FloatTensor] = None
 
 
 class T5ForConditionalGeneration(T5PreTrainedModel):
@@ -41,7 +47,13 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
     def __init__(self, config: T5Config):
         super().__init__(config)
         self.model_dim = config.d_model
+        # NOTE: temporary change, for MT3 please uncomment this line
         self.proj = nn.Linear(self.model_dim, self.model_dim, bias=False)
+        
+        # NOTE: for encodec model please uncomment this line
+        # self.proj = nn.Embedding(
+        #     config.encoder_vocab_size, config.d_model)
+
         self.decoder_embed_tokens = nn.Embedding(
             config.vocab_size, config.d_model)
 
@@ -58,6 +70,8 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         self.decoder = T5Stack(decoder_config, self.decoder_embed_tokens)
 
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+        # self.mean_pool = nn.AdaptiveAvgPool1d(1)
+        # self.num_inst_cls = nn.Linear(config.d_model, 16)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -159,6 +173,9 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             sequence_output = sequence_output * (self.model_dim**-0.5)
         
         lm_logits = self.lm_head(sequence_output)
+
+        # mean_hidden_states = self.mean_pool(sequence_output.transpose(1, 2)).squeeze(-1)
+        # inst_cls_logits = self.num_inst_cls(mean_hidden_states)
         
         return lm_logits, encoder_outputs, decoder_outputs
 
@@ -180,6 +197,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        num_insts: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple[torch.FloatTensor], Seq2SeqLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -234,6 +252,10 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             loss = loss_fct(
                 lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1)
             )
+        # loss_inst = None
+        # if num_insts is not None:
+        #     criterion_inst = nn.BCEWithLogitsLoss()
+        #     loss_inst = criterion_inst(inst_cls_logits, num_insts)
 
         if not return_dict:
             output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
@@ -530,7 +552,9 @@ class T5Stack(T5PreTrainedModel):
             input_shape = input_ids.size()[:2]
 
         if inputs_embeds is None:
+            # print('input_ids', input_ids.shape)
             inputs_embeds = self.embed_tokens(input_ids)
+            # print('input embeds', inputs_embeds.shape)
 
         batch_size, seq_length = input_shape[:2]
 
@@ -586,9 +610,9 @@ class T5Stack(T5PreTrainedModel):
         encoder_decoder_position_bias = None
 
         # pos_emb
-        inputs_embeds = inputs_embeds + \
-            self.pos_emb(
+        tmp = self.pos_emb(
                 seq=inputs_embeds.shape[1], offset=past_key_values_length)
+        inputs_embeds = inputs_embeds + tmp
 
         hidden_states = self.dropout(inputs_embeds)
 
@@ -691,7 +715,7 @@ class T5Stack(T5PreTrainedModel):
 
 
 class FixedPositionalEmbedding(nn.Module):
-    def __init__(self, dim, max_length=2048):
+    def __init__(self, dim, max_length=5000):
         super().__init__()
         inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer('inv_freq', inv_freq)

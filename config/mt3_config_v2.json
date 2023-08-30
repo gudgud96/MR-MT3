@@ -2,7 +2,7 @@
     "architectures": ["T5ForConditionalGeneration"], 
     "d_ff": 1024, 
     "d_kv": 64, 
-    "d_model": 512, 
+    "d_model": 1024, 
     "decoder_start_token_id": 0, 
     "dropout_rate": 0.1, 
     "pad_token_id": 0, 
