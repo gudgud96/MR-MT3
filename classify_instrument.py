@@ -5,86 +5,135 @@ from torch.utils.data import Dataset, DataLoader
 import glob
 import numpy as np
 from tqdm import tqdm
-from sklearn.metrics import f1_score
-import pickle
+from sklearn.metrics import f1_score, precision_score
+import os
 
 """
-Doesn't work. Instrument classification directly on encoder output is only 0.6 acc.
+instrument classification - 0.6 F1
+pitch classification - 0.4 F1
 """
-
 
 class SimpleDense(nn.Module):
     def __init__(self):
         super().__init__()
-        self.lin = nn.Sequential(
-            nn.Linear(512, 128),
-            # nn.ReLU(),
-            # nn.Linear(128, 128)
-        )
+        self.lin = nn.Linear(512, 16)
+
     def forward(self, x):
         return self.lin(x)
+    
+# validation set
+val_keys = sorted(glob.glob("slakh_mt3_hidden_state_eval_validation/*/"))
+test_keys = sorted(glob.glob("slakh_mt3_hidden_state_eval_test/*/"))
+
+print("val keys:", len(val_keys), "test keys:", len(test_keys))
+
+val_enc_hidden = []
+val_instruments = []
+val_pitches = []
+for key in tqdm(val_keys):
+    enc_hidden = np.load(os.path.join(key, "enc_hidden.npy"))
+    instruments = np.load(os.path.join(key, "instruments.npy"))
+
+    assert np.argwhere(instruments == 1).shape[0] > 0
+    pitches = np.load(os.path.join(key, "pitches.npy"))
+
+    val_enc_hidden.append(enc_hidden)
+    val_instruments.append(instruments)
+    val_pitches.append(pitches)
+
+val_enc_hidden = np.concatenate(val_enc_hidden, axis=0)
+val_instruments = np.concatenate(val_instruments, axis=0)
+val_pitches = np.concatenate(val_pitches, axis=0)
+
+np.save("val_enc_hidden.npy", val_enc_hidden)
+np.save("val_instruments.npy", val_instruments)
+np.save("val_pitches.npy", val_pitches)
+
+print("val enc hidden:", val_enc_hidden.shape)
+print("val instruments:", val_instruments.shape)
+print("val pitches:", val_pitches.shape)
+
+# test set
+test_enc_hidden = []
+test_instruments = []
+test_pitches = []
+
+for key in tqdm(test_keys):
+    enc_hidden = np.load(os.path.join(key, "enc_hidden.npy"))
+    instruments = np.load(os.path.join(key, "instruments.npy"))
+    pitches = np.load(os.path.join(key, "pitches.npy"))
+
+    test_enc_hidden.append(enc_hidden)
+    test_instruments.append(instruments)
+    test_pitches.append(pitches)
+
+test_enc_hidden = np.concatenate(test_enc_hidden, axis=0)
+test_instruments = np.concatenate(test_instruments, axis=0)
+test_pitches = np.concatenate(test_pitches, axis=0)
+
+np.save("test_enc_hidden.npy", test_enc_hidden)
+np.save("test_instruments.npy", test_instruments)
+np.save("test_pitches.npy", test_pitches)
+
+print("test enc hidden:", test_enc_hidden.shape)
+print("test instruments:", test_instruments.shape)
+print("test pitches:", test_pitches.shape)
 
 
 class InstEmbeddingDataset(Dataset):
-    def __init__(self, mode="train", type="enc", head=8):
+    def __init__(self, type="instrument", mode="validation"):
         super().__init__()
-        self.mode = mode
-        if mode == "train":
-            self.keys = sorted(glob.glob("embeddings/train/*/mix.pickle"))
-        elif mode == "validation":
-            self.keys = sorted(glob.glob("embeddings/validation/*/mix.pickle"))
-        elif mode == "test":
-            self.keys = sorted(glob.glob("embeddings/test/*/mix.pickle"))
-        
         self.type = type
-        self.head = head
-                
+        if mode == "validation":
+            self.enc_hidden = np.load("val_enc_hidden.npy")
+            self.instruments = np.load("val_instruments.npy")
+            self.pitches = np.load("val_pitches.npy")
+        elif mode == "test":
+            self.enc_hidden = np.load("test_enc_hidden.npy")
+            self.instruments = np.load("test_instruments.npy")
+            self.pitches = np.load("test_pitches.npy")
+        else:
+            raise NotImplementedError
+
     def __len__(self):
-        return len(self.keys)
+        return len(self.enc_hidden)
 
     def __getitem__(self, idx):
-        key = self.keys[idx]
-        with open(key, "rb") as f:
-            dic = pickle.load(f)
-        
-        embedding_lst = []
-        inst_labels = []
-        for idx in range(len(dic)):
-            embedding = dic[idx][self.type][self.head]
-            embedding = np.mean(embedding, axis=0)
-            embedding_lst.append(embedding)
-            
-            inst_label = np.zeros(128)
-            is_drum = False
-            for note in dic[idx]["event"].notes:
-                if note.is_drum:
-                    is_drum = True
-                else:
-                    inst_label[note.program] = 1
-
-            inst_labels.append(inst_label)
-        
-        return np.stack(embedding_lst), np.stack(inst_labels)
+        if self.type == "enc":
+            return self.enc_hidden[idx]
+        elif self.type == "instrument":
+            return self.enc_hidden[idx], self.instruments[idx]
+        elif self.type == "pitch":
+            return self.enc_hidden[idx], self.pitches[idx]
+        else:
+            raise NotImplementedError
 
 
 def collate_fn(lst):
     x = [torch.from_numpy(k[0]) for k in lst]
     y = [torch.from_numpy(k[1]) for k in lst]
-    return torch.cat(x), torch.cat(y)
+    return torch.stack(x), torch.stack(y)
 
 
 def get_acc(label_out, label_gt):
-    f1 = f1_score(label_gt.cpu().int().detach().numpy(), label_out.cpu().int().detach().numpy(), average='macro', zero_division=1)
-    # print(f1)
+    f1 = precision_score(
+        label_gt.cpu().int().detach().numpy(), 
+        label_out.cpu().int().detach().numpy(), 
+        average='macro',
+        zero_division=0
+    )
+    return f1
+    
     # intersect = label_out.cpu().int() & label_gt.cpu().int()
     # acc = torch.sum(intersect, dim=-1) / torch.sum(label_gt.cpu(), dim=-1)
-    return f1
+    # return torch.mean(acc)
         
 
-ds = InstEmbeddingDataset(mode="train", type="dec", head=0)
-dl = DataLoader(ds, batch_size=16, shuffle=True, collate_fn=collate_fn, num_workers=12)
-val_ds = InstEmbeddingDataset(mode="validation", type="dec", head=0)
-val_dl = DataLoader(val_ds, batch_size=16, shuffle=False, collate_fn=collate_fn)
+type = "instrument"
+ds = InstEmbeddingDataset(mode="validation", type=type)
+dl = DataLoader(ds, batch_size=128, shuffle=True, collate_fn=collate_fn)
+val_ds = InstEmbeddingDataset(mode="test", type=type)
+val_dl = DataLoader(val_ds, batch_size=128, shuffle=False, collate_fn=collate_fn)
 criterion = nn.BCEWithLogitsLoss()
 model = SimpleDense()
 model.cuda()
@@ -95,7 +144,7 @@ best_val_loss = 10000
 for ep in range(2000):
     avg_loss = 0
     avg_f1 = 0
-    for item in tqdm(dl):
+    for item in dl:
         enc_out, label = item
         enc_out, label = enc_out.cuda().float(), label.cuda().float()
         optimizer.zero_grad()
@@ -119,7 +168,7 @@ for ep in range(2000):
     avg_val_f1 = 0
     model.eval()
     with torch.no_grad():
-        for item in tqdm(val_dl):
+        for item in val_dl:
             enc_out, label = item
             enc_out, label = enc_out.cuda().float(), label.cuda().float()
             logits = model(enc_out)
@@ -143,6 +192,3 @@ for ep in range(2000):
     if avg_val_loss < best_val_loss:
         best_val_loss = avg_val_loss
         torch.save(model.state_dict(), "inst.pt")
-    
-
-

@@ -40,3 +40,5 @@ def main(root_path):
 
 if __name__ == '__main__':
     main('/data/slakh2100_flac_redux/train')
+    main('/data/slakh2100_flac_redux/validation')
+    main('/data/slakh2100_flac_redux/test')

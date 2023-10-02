@@ -1,14 +1,9 @@
 import torch
-import torchaudio
 from torch.utils.data import Dataset, DataLoader
-from encodec import EncodecModel
-from encodec.utils import convert_audio
-import soundfile as sf
 
 # import tensorflow as tf
 # tf.config.set_visible_devices([], 'GPU')
 
-import os
 from itertools import cycle
 import json
 import random
@@ -19,12 +14,12 @@ import note_seq
 from glob import glob
 from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding, metrics_utils
 from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
-from tqdm import tqdm
+import soundfile as sf
 
 MIN_LOG_MEL = -12
 MAX_LOG_MEL = 5
 
-class SlakhDatasetEncodec(Dataset):
+class SlakhDataset(Dataset):
 
     def __init__(
         self, 
@@ -57,10 +52,6 @@ class SlakhDatasetEncodec(Dataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
 
-        self.encodec_model = EncodecModel.encodec_model_24khz()
-        self.encodec_model.set_target_bandwidth(6.0)    # n_q = 8
-
-
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
         audio_files = sorted(glob(f'{root_dir}/**/{self.audio_filename}'))
@@ -87,6 +78,7 @@ class SlakhDatasetEncodec(Dataset):
                          [0, frame_size - len(samples) % frame_size],
                          mode='constant')
 
+        
         frames = spectrograms.split_audio(samples, self.spectrogram_config)
 
         num_frames = len(samples) // frame_size
@@ -176,6 +168,7 @@ class SlakhDatasetEncodec(Dataset):
         target_end_idx = features['input_event_end_indices'][-1]
 
         features['targets'] = features['targets'][target_start_idx:target_end_idx]
+        # print('features[targets]', [self.get_token_name(k) for k in features['targets']])
 
         if state_events_end_token is not None:
             # Extract the state events corresponding to the audio start token, and
@@ -189,6 +182,7 @@ class SlakhDatasetEncodec(Dataset):
                 features['state_events'][state_event_start_idx:state_event_end_idx],
                 features['targets']
             ], axis=0)
+            # print('features[targets] 2', [self.get_token_name(k) for k in features['targets']])
 
         return features
 
@@ -210,22 +204,22 @@ class SlakhDatasetEncodec(Dataset):
         current_state = np.zeros(
             len(state_change_event_ranges), dtype=np.int32)
         for j, event in enumerate(events):
-            # if j <= 100:
-            #     print(j, event, self.codec.decode_event_index(event))
             if self.codec.is_shift_event_index(event):
                 shift_steps += 1
                 total_shift_steps += 1
             else:
                 # If this event is a state change and has the same value as the current
                 # state, we can skip it entirely.
-                is_redundant = False
-                for i, (min_index, max_index) in enumerate(state_change_event_ranges):
-                    if (min_index <= event) and (event <= max_index):
-                        if current_state[i] == event:
-                            is_redundant = True
-                        current_state[i] = event
-                if is_redundant:
-                    continue
+
+                # NOTE: what if we don't remove redundant tokens?
+                # is_redundant = False
+                # for i, (min_index, max_index) in enumerate(state_change_event_ranges):
+                #     if (min_index <= event) and (event <= max_index):
+                #         if current_state[i] == event:
+                #             is_redundant = True
+                #         current_state[i] = event
+                # if is_redundant:
+                #     continue
 
                 # Once we've reached a non-shift event, RLE all previous shift events
                 # before outputting the non-shift event.
@@ -234,15 +228,45 @@ class SlakhDatasetEncodec(Dataset):
                     while shift_steps > 0:
                         output_steps = np.minimum(
                             self.codec.max_shift_steps, shift_steps)
-                        # print("output_steps", output_steps)
                         output = np.concatenate(
                             [output, [output_steps]], axis=0)
                         shift_steps -= output_steps
-                    # print("shift_steps", shift_steps, total_shift_steps)
                 output = np.concatenate([output, [event]], axis=0)
 
         features[feature_key] = output
         return features
+    
+    def _remove_redundant_tokens(
+        self,
+        events,
+        state_change_event_types=['velocity', 'program'],
+    ):
+        state_change_event_ranges = [self.codec.event_type_range(event_type)
+                                     for event_type in state_change_event_types]
+
+        output = []
+
+        current_state = np.zeros(
+            len(state_change_event_ranges), dtype=np.int32)
+        for j, event in enumerate(events):
+            # If this event is a state change and has the same value as the current
+            # state, we can skip it entirely.
+
+            # NOTE: what if we don't remove redundant tokens?
+            is_redundant = False
+            for i, (min_index, max_index) in enumerate(state_change_event_ranges):
+                if (min_index <= event) and (event <= max_index):
+                    if current_state[i] == event:
+                        is_redundant = True
+                    current_state[i] = event
+            if is_redundant:
+                continue
+
+            # Once we've reached a non-shift event, RLE all previous shift events
+            # before outputting the non-shift event.
+            output = np.concatenate([output, [event]], axis=0)
+
+        return output
 
     def _compute_spectrogram(self, ex):
         samples = spectrograms.flatten_frames(ex['inputs'])
@@ -253,7 +277,7 @@ class SlakhDatasetEncodec(Dataset):
         return ex
 
     def _pad_length(self, row):
-        inputs = torch.from_numpy(row['inputs'][:self.mel_length]).to(torch.float32)
+        inputs = row['inputs'][:self.mel_length].to(torch.float32)
         targets = torch.from_numpy(row['targets'][:self.event_length]).to(torch.long)
         targets = targets + self.vocab.num_special_tokens()
         if inputs.shape[0] < self.mel_length:
@@ -268,7 +292,7 @@ class SlakhDatasetEncodec(Dataset):
                 targets = torch.cat([targets, eos], dim=0)
         return {'inputs': inputs, 'targets': targets, "input_times": row["input_times"]}
     
-    def _split_frame(self, row, length=512):
+    def _split_frame(self, row, length=2000):
         rows = []
         input_length = row['inputs'].shape[0]
         for split in range(0, input_length, length):
@@ -290,7 +314,6 @@ class SlakhDatasetEncodec(Dataset):
         new_row = {}
         input_length = row['inputs'].shape[0]
         random_length = input_length - self.mel_length
-        assert random_length == 0
         if random_length < 1:
             return row
         start_length = random.randint(0, random_length)
@@ -340,59 +363,57 @@ class SlakhDatasetEncodec(Dataset):
         """
         row = self.df[idx]
         ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
-
         audio, sr = librosa.load(row['audio_path'], sr=None)
-        audio_path = row['audio_path']
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
         row = self._tokenize(ns, audio, inst_names)
         rows = self._split_frame(row)
         
-        inputs, targets, frame_times = [], [], []
-        # num_rows = 2
-        # if len(rows) > num_rows:
-        #     start_idx = random.randint(0, len(rows) - num_rows)
-        #     rows = rows[start_idx : start_idx + num_rows]
+        inputs, targets, frame_times, num_insts = [], [], [], []
+        num_rows = 8
+        if len(rows) > num_rows:
+            start_idx = random.randint(0, len(rows) - num_rows)
+            # start_idx = 0
+            rows = rows[start_idx : start_idx + num_rows]
         
         predictions = []
         wavs = []
-        wavs2 = []
-        fake_start_time = None
+        fake_start = None
         for j, row in enumerate(rows):
             row = self._random_chunk(row)
             row = self._extract_target_sequence_with_indices(row, self.tie_token)
             row = self._run_length_encode_shifts(row)
-
+            
             # wavs.append(row["inputs"].reshape(-1,))
+            # sf.write(f"test_{j}.wav", row["inputs"].reshape(-1,), 16000, "PCM_24")
 
-            cur_wav = torch.from_numpy(row["inputs"].reshape(-1,))
-            cur_wav = cur_wav.unsqueeze(0)
-            cur_wav = convert_audio(
-                cur_wav, 
-                self.spectrogram_config.sample_rate, 
-                self.encodec_model.sample_rate, 
-                self.encodec_model.channels
-            )
-            cur_wav = cur_wav.unsqueeze(0)
+            row = self._compute_spectrogram(row)
+            
+            # inst_tokens = row['targets']
+            # inst_tokens = inst_tokens[(inst_tokens >= 1132) & (inst_tokens <= 1259)]
+            # inst_tokens -= 1132
+            # inst_tokens = inst_tokens // 8
+            # inst_tokens = np.unique(inst_tokens).astype(int)
 
-            with torch.no_grad():
-                encoded_frames = self.encodec_model.encode(cur_wav)
-            codes = torch.cat([encoded[0] for encoded in encoded_frames], dim=-1)
-            codes = codes.view(codes.shape[0], -1).squeeze(0)
+            # inst_vec = np.zeros(16,)
+            # inst_vec[inst_tokens] = 1
+            # num_insts.append(inst_vec)
 
-            # ========== for reconstructing the MIDI from events =========== #
-            # with torch.no_grad():
-            #     cur_wav_2 = self.encodec_model.decode(encoded_frames)
-            # wavs2.append(cur_wav_2.squeeze().cpu().detach().numpy())
-            # ========== for reconstructing the MIDI from events =========== #
-
+            # -- random order augmentation --
+            # print("=======")
+            # print(j, [self.get_token_name(t) for t in row["targets"]])
+            t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
+            t = np.array([self.token_to_idx(k) for k in t])
+            # print(j, [self.get_token_name(token) for token in t])
+            t = self._remove_redundant_tokens(t)
+            # print(j, [self.get_token_name(token) for token in t])
+            row["targets"] = t
+            
             row = self._pad_length(row)
-            # inputs.append(row["inputs"])
-            inputs.append(codes)
+            inputs.append(row["inputs"])
             targets.append(row["targets"])   
 
             # ========== for reconstructing the MIDI from events =========== #
-            
             # result = row["targets"]
             # EOS_TOKEN_ID = 1    # TODO: this is a hack!
             # after_eos = torch.cumsum(
@@ -401,63 +422,242 @@ class SlakhDatasetEncodec(Dataset):
             # result -= self.vocab.num_special_tokens()
             # result = torch.where(after_eos.bool(), -1, result)
 
-            # print("start_times", row["input_times"][0])
-            # if fake_start_time is None:
-            #     fake_start_time = row["input_times"][0]
+            # # print("start_times", row["input_times"][0])
+            # if fake_start is None:
+            #     fake_start = row["input_times"][0]
+            # predictions = []
             # predictions.append({
             #     'est_tokens': result.cpu().detach().numpy(),    # has to be numpy here, or else problematic
-            #     'start_time': row["input_times"][0] - fake_start_time,
+            #     # 'start_time': row["input_times"][0] - fake_start,
+            #     'start_time': 0,
             #     'raw_inputs': []
             # })
+            # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
+            # result = metrics_utils.event_predictions_to_ns(
+            #     predictions, codec=self.codec, encoding_spec=encoding_spec)
+            # note_seq.sequence_proto_to_midi_file(result['est_ns'], f"test_out_{j}.mid")   
+            # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
+
              # ========== for reconstructing the MIDI from events =========== #
         
         # ========== for reconstructing the MIDI from events =========== #
         # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
         # result = metrics_utils.event_predictions_to_ns(
         #     predictions, codec=self.codec, encoding_spec=encoding_spec)
-        # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid") 
-        # wavs = np.concatenate(wavs)
-        # wavs2 = np.concatenate(wavs2)
-        # sf.write('test_out.wav', wavs, 16000)
-        # sf.write('test_out_2.wav', wavs2, self.encodec_model.sample_rate)
-  
+        # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
+        # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
         # ========== for reconstructing the MIDI from events =========== #  
-        return torch.stack(inputs), torch.stack(targets), audio_path
+        # num_insts = np.stack(num_insts)
+
+        inputs = torch.stack(inputs)
+        targets = torch.stack(targets)
+        decoder_inputs = self._shift_right(targets)
+        decoder_inputs = self.add_pix2seq_noise(decoder_inputs)
+
+        # this is to mimic pix2seq's noise class token. seriously i dunno if this works
+        targets.masked_fill_(targets == -100, 1)
+        return inputs, decoder_inputs, targets, 
+        # return torch.stack(inputs), torch.stack(targets), torch.from_numpy(num_insts)
     
     def __len__(self):
         return len(self.df)
+    
+    def _shift_right(self, targets):
+        decoder_start_token_id = 0
+        
+        decoder_inputs = torch.zeros_like(targets)
+        decoder_inputs[:, 1:] = targets[:, :-1].clone()
+        decoder_inputs[:, 0] = decoder_start_token_id
+
+        # decoder_inputs.masked_fill_(decoder_inputs == -100, 0)
+
+        return decoder_inputs
+    
+    def randomize_tokens(self, token_lst):
+        shift_idx = [i for i in range(len(token_lst)) if "shift" in token_lst[i]]
+        if len(shift_idx) == 0:
+            return token_lst
+        res = token_lst[:shift_idx[0]]
+        for j in range(len(shift_idx) - 1):
+            res += [token_lst[shift_idx[j]]]
+            
+            start_idx = shift_idx[j]
+            end_idx = shift_idx[j + 1]
+            cur = token_lst[start_idx + 1 : end_idx]
+            cur_lst = []
+            ptr = 0
+            while ptr < len(cur):
+                t = cur[ptr]
+                if "program" in t:
+                    cur_lst.append([cur[ptr], cur[ptr + 1], cur[ptr + 2]])
+                    ptr += 3
+                elif "velocity" in t:
+                    cur_lst.append([cur[ptr], cur[ptr + 1]])
+                    ptr += 2
+
+            indices = np.arange(len(cur_lst))
+            np.random.shuffle(indices)
+
+            new_cur_lst = []
+            for idx in indices:
+                new_cur_lst.append(cur_lst[idx])
+            
+            new_cur_lst = [item for sublist in new_cur_lst for item in sublist]
+            res += new_cur_lst
+        
+        res += token_lst[shift_idx[-1]:]
+        return res
+    
+    def get_token_name(self, token_idx):
+        token_idx = int(token_idx)
+        if token_idx >= 1001 and token_idx <= 1128:
+            token = f"pitch_{token_idx - 1001}"
+        elif token_idx >= 1129 and token_idx <= 1130:
+            token = f"velocity_{token_idx - 1129}"
+        elif token_idx >= 1131 and token_idx <= 1131:
+            token = "tie"
+        elif token_idx >= 1132 and token_idx <= 1259:
+            token = f"program_{token_idx - 1132}"
+        elif token_idx >= 1260 and token_idx <= 1387:
+            token = f"drum_{token_idx - 1260}"
+        elif token_idx >= 0 and token_idx < 1000:
+            token = f"shift_{token_idx}"
+        else:
+            token = f"invalid_{token_idx}"
+        
+        return token
+    
+    def token_to_idx(self, token_str):
+        if "pitch" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1001
+        elif "velocity" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1129
+        elif "tie" in token_str:
+            token_idx = 1131
+        elif "program" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1132
+        elif "drum" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1260
+        elif "shift" in token_str:
+            token_idx = int(token_str.split("_")[1])
+
+        return token_idx
+    
+    def add_pix2seq_noise(self, decoder_input_ids):
+        """
+        decoder_input_ids: (bs, seq_len)
+        """
+        eos_token_id = 1
+        for i in range(decoder_input_ids.shape[0]):
+            eos_idx = (decoder_input_ids[i] == eos_token_id).nonzero().item()
+            noise_length = decoder_input_ids.shape[1] - eos_idx
+            noise_tokens = self.generate_pix2seq_noise(noise_length)
+            decoder_input_ids[i, eos_idx:] = noise_tokens.long()
+        return decoder_input_ids
+    
+    def generate_pix2seq_noise(self, length):
+        """
+                     / drum       - velocity - drum  
+        shift - note
+                     \ instrument - program  - velocity - pitch
+        """
+        # NOTE: check if the range is correct for token
+
+        noise_tokens = torch.zeros(length)
+        state = "shift"
+        offset = self.vocab.num_special_tokens()
+
+        i = 0
+        while i < length:
+            # first add a shift token
+            if state == "shift":
+                shift = torch.randint(0, 1000, (1,))[0]
+                noise_tokens[i] = shift + offset
+                i += 1
+                state = "note"
+
+            elif state == "note":
+                if torch.rand(1)[0] < 0.5:
+                    state = "drum"
+                else:
+                    state = "instrument"
+            
+            elif state == "drum":
+                velocity = torch.randint(1129, 1130, (1,))[0]  
+                noise_tokens[i] = velocity + offset
+                i += 1
+                state = "drum_note"
+            
+            elif state == "drum_note":
+                drum = torch.randint(1260, 1387, (1,))[0]
+                noise_tokens[i] = drum + offset
+                i += 1
+                if torch.rand(1)[0] < 0.5:
+                    state = "shift"
+                else:
+                    state = "note"
+            
+            elif state == "instrument":
+                program = torch.randint(1132, 1259, (1,))[0]
+                noise_tokens[i] = program + offset
+                i += 1
+                state = "instrument_vel"
+            
+            elif state == "instrument_vel":
+                velocity = torch.randint(1129, 1130, (1,))[0]
+                noise_tokens[i] = velocity + offset
+                i += 1
+                state = "instrument_pitch"
+            
+            elif state == "instrument_pitch":
+                pitch = torch.randint(1001, 1128, (1,))[0]
+                noise_tokens[i] = pitch + offset
+                i += 1
+                if torch.rand(1)[0] < 0.5:
+                    state = "shift"
+                else:
+                    state = "note"
+        
+        return noise_tokens
 
 
 def collate_fn(lst):
-    inputs = [k[0] for k in lst]
-    targets = [k[1] for k in lst]
-    return torch.cat(inputs), torch.cat(targets)
+    inputs = torch.cat([k[0] for k in lst])
+    decoder_inputs = torch.cat([k[1] for k in lst])
+    targets = torch.cat([k[2] for k in lst])
+
+    # add random shuffling here
+    # indices = np.arange(inputs.shape[0])
+    # np.random.shuffle(indices)
+    # indices = torch.from_numpy(indices)
+    # inputs = inputs[indices]
+    # targets = targets[indices]
+    # num_insts = num_insts[indices]
+
+    return inputs, decoder_inputs, targets
 
 if __name__ == '__main__':
-    # for now is mel_length=512, n_q = 8
-    dataset = SlakhDatasetEncodec(
+    dataset = SlakhDataset(
         root_dir='/data/slakh2100_flac_redux/test/',
         shuffle=False,
         is_train=False,
         include_ties=True,
-        mel_length=512
+        mel_length=256
     )
-    # print("pitch", dataset.codec.event_type_range("pitch"))
-    # print("velocity", dataset.codec.event_type_range("velocity"))
-    # print("tie", dataset.codec.event_type_range("tie"))
-    # print("program", dataset.codec.event_type_range("program"))
-    # print("drum", dataset.codec.event_type_range("drum"))
-    # dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
-    # for idx, item in enumerate(dl):
-    #     inputs, targets = item
-    #     print(idx, inputs.shape, targets.shape)
-    #     break
-
-    # let's dump the dataset out instead of running encodec on-the-fly
-    for idx, item in tqdm(enumerate(dataset), total=len(dataset)):
-        inputs, targets, audio_path = item
-        name = audio_path.split("/")[-2]
-        os.makedirs(f"/home/gudgud96/encodec_mt3/test/{name}", exist_ok=True)
-        np.save(f"/home/gudgud96/encodec_mt3/test/{name}/inputs.npy", inputs.cpu().detach().numpy().astype(int))
-        np.save(f"/home/gudgud96/encodec_mt3/test/{name}/targets.npy", targets.cpu().detach().numpy().astype(int))
+    print("pitch", dataset.codec.event_type_range("pitch"))
+    print("velocity", dataset.codec.event_type_range("velocity"))
+    print("tie", dataset.codec.event_type_range("tie"))
+    print("program", dataset.codec.event_type_range("program"))
+    print("drum", dataset.codec.event_type_range("drum"))
+    dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
+    for idx, item in enumerate(dl):
+        inputs, decoder_inputs, targets = item
+        print(idx, inputs.shape, targets.shape)
+        for x in decoder_inputs[0]:
+            print(x.item(), end=",")
+        print()
+        for x in targets[0]:
+            print(x.item(), end=",")
+        print()
+        break
     

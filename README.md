@@ -1,27 +1,16 @@
-## MT3: Multi-Task Multitrack Music Transcription - Pytorch
+## Setup steps
 
-This is an unofficial implementation of MT3: Multi-Task Multitrack Music Transcription in pytorch.
+1. Install requirements - `python3 -m pip install -r requirements.txt`. Make sure `pip` is up-to-date.
 
-## Usage
+2. Re-sample Slakh `.flac` to 16kHz - `python3 resample.py`.
 
-```python
-from inference import InferenceHandler
+3. Create the grouped stem version as ground truth instead of the existing `all_src.mid`. Some bass notes have octave errors - `python3 midi_script.py`.
 
-handler = InferenceHandler('./pretrained')
-handler.inference('music.mp3')
-```
+## Training
 
-```python
-# training not done yet
-```
+`python3 mt3_net.py`
 
-## Citations
+After training is done, run `python3 mt3_net.py --mode test --path <checkpoint_path.ckpt>` to convert `.ckpt` to `.pth`.
 
-```bibtex
-@article{gardner2021mt3,
-  title={MT3: Multi-Task Multitrack Music Transcription},
-  author={Gardner, Josh and Simon, Ian and Manilow, Ethan and Hawthorne, Curtis and Engel, Jesse},
-  journal={arXiv preprint arXiv:2111.03017},
-  year={2021}
-}
-```
+## Evaluation
+`python3 analysis.py` -> `python3 evaluate.py`

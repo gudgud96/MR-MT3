@@ -1,3 +1,6 @@
+"""
+Multi-track transcription evaluation script for Slakh dataset.
+"""
 import mir_eval
 import glob
 import pretty_midi
@@ -271,27 +274,19 @@ def loop_transcription_eval(ref_mid, est_mid):
     
 
 from tqdm import tqdm
-# Loop data
-# dir = sorted(glob.glob("loops_data/*/mix.mid"))
-# dir2 = [k.replace("loops_data", "loops_out") for k in dir]
 
 # Slakh
-# fname = "slakh_recon_randomorder"
-# fname = "slakh_recon_randomorder_pix2seq"
-# fname = "slakh_recon_randomorder_lite_enc"
-# fname = "slakh_recon_randomorder_gru_bs=8"
-# fname = "slakh_recon_randomorder_lstm_2"
-# fname = "slakh_recon_norm_v2_0.5964"
-fname = "slakh_baseline"
-# fname = "slakh_recon_xl2_context=2048"
-# fname = "slakh_recon_xl2_inst_context=2048"
-# fname = "slakh_recon_xl2_inst"
-# fname = "slakh_recon_xl2_context=512"
-# fname = "slakh_mt3_hidden_state_eval"
+# exp_tag_name = "slakh_recon_randomorder"
+# exp_tag_name = "slakh_recon_randomorder_pix2seq"
+# exp_tag_name = "slakh_recon_norm_v2_0.5964"
+exp_tag_name = "slakh_baseline"
+# exp_tag_name = "slakh_recon_xl2_context=2048"
+# exp_tag_name = "slakh_recon_xl2_inst_context=2048"
+# exp_tag_name = "slakh_recon_xl2_inst"
+# exp_tag_name = "slakh_recon_xl2_context=512"
 
-dir = sorted(glob.glob(f"{fname}/*/mix.mid"))    # TODO: this is just for fast evaluation
-dir = dir[:1]
-dir2 = [k.replace(f"{fname}/", "/data/slakh2100_flac_redux/test/").replace("/mix.mid", "/all_src_v2.mid") for k in dir]
+dir = sorted(glob.glob(f"{exp_tag_name}/*/mix.mid"))
+dir2 = [k.replace(f"{exp_tag_name}/", "/data/slakh2100_flac_redux/test/").replace("/mix.mid", "/all_src_v2.mid") for k in dir]
 fnames = zip(dir2, dir)
 
 
@@ -354,10 +349,10 @@ d = {
     11: "Synth Pad",
     12: "Synth Effects",
 }
-# print(program_f1_dict)
-# program_f1_dict = {k: np.mean(np.array(v)) for k, v in program_f1_dict.items()}
-# for key in d:
-#     if key == -1:
-#         print("{}: {:.4}".format(d[key], program_f1_dict[key]))
-#     elif key * 8 in program_f1_dict:
-#         print("{}: {:.4}".format(d[key], program_f1_dict[key * 8]))
+print(program_f1_dict)
+program_f1_dict = {k: np.mean(np.array(v)) for k, v in program_f1_dict.items()}
+for key in d:
+    if key == -1:
+        print("{}: {:.4}".format(d[key], program_f1_dict[key]))
+    elif key * 8 in program_f1_dict:
+        print("{}: {:.4}".format(d[key], program_f1_dict[key * 8]))
