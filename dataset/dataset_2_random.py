@@ -1,8 +1,8 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-# import tensorflow as tf
-# tf.config.set_visible_devices([], 'GPU')
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 
 from itertools import cycle
 import json
@@ -547,6 +547,6 @@ if __name__ == '__main__':
     dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
     for idx, item in enumerate(dl):
         inputs, targets = item
-        print(idx, inputs.shape, targets.shape)
+        print(idx, inputs.shape, targets[0])
         break
     

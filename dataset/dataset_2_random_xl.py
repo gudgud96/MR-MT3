@@ -1,8 +1,8 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-# import tensorflow as tf
-# tf.config.set_visible_devices([], 'GPU')
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 
 from itertools import cycle
 import json

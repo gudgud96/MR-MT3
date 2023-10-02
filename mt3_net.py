@@ -126,7 +126,9 @@ def main(config, model_config, result_dir, mode, path):
             accelerator='gpu',
             accumulate_grad_batches=config.grad_accum,
             num_sanity_val_steps=2,
-            log_every_n_steps=645
+            log_every_n_steps=645,
+            strategy="ddp_find_unused_parameters_false",
+            devices=2
         )
         trainer.fit(model)
 
