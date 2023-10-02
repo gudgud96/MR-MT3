@@ -6,6 +6,8 @@
 
 3. Create the grouped stem version as ground truth instead of the existing `all_src.mid`. Some bass notes have octave errors - `python3 midi_script.py`.
 
+4. `python3 tools/generate_inst_names.py`
+
 ## Training
 
 `python3 mt3_net.py`
