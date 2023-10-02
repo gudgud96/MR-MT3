@@ -204,7 +204,6 @@ class SlakhDataset(Dataset):
         current_state = np.zeros(
             len(state_change_event_ranges), dtype=np.int32)
         for j, event in enumerate(events):
-            print(j, event)
             if self.codec.is_shift_event_index(event):
                 shift_steps += 1
                 total_shift_steps += 1
@@ -212,15 +211,16 @@ class SlakhDataset(Dataset):
                 # If this event is a state change and has the same value as the current
                 # state, we can skip it entirely.
 
-                # NOTE: what if we don't remove redundant tokens?
-                is_redundant = False
-                for i, (min_index, max_index) in enumerate(state_change_event_ranges):
-                    if (min_index <= event) and (event <= max_index):
-                        if current_state[i] == event:
-                            is_redundant = True
-                        current_state[i] = event
-                if is_redundant:
-                    continue
+                # NOTE: this needs to be uncommented if not using random-order augmentation
+                # because random-order augmentation use `_remove_redundant_tokens` to replace this part
+                # is_redundant = False
+                # for i, (min_index, max_index) in enumerate(state_change_event_ranges):
+                #     if (min_index <= event) and (event <= max_index):
+                #         if current_state[i] == event:
+                #             is_redundant = True
+                #         current_state[i] = event
+                # if is_redundant:
+                #     continue
 
                 # Once we've reached a non-shift event, RLE all previous shift events
                 # before outputting the non-shift event.
@@ -236,6 +236,37 @@ class SlakhDataset(Dataset):
 
         features[feature_key] = output
         return features
+    
+    def _remove_redundant_tokens(
+        self,
+        events,
+        state_change_event_types=['velocity', 'program'],
+    ):
+        state_change_event_ranges = [self.codec.event_type_range(event_type)
+                                     for event_type in state_change_event_types]
+
+        output = []
+
+        current_state = np.zeros(
+            len(state_change_event_ranges), dtype=np.int32)
+        for j, event in enumerate(events):
+            # If this event is a state change and has the same value as the current
+            # state, we can skip it entirely.
+
+            is_redundant = False
+            for i, (min_index, max_index) in enumerate(state_change_event_ranges):
+                if (min_index <= event) and (event <= max_index):
+                    if current_state[i] == event:
+                        is_redundant = True
+                    current_state[i] = event
+            if is_redundant:
+                continue
+
+            # Once we've reached a non-shift event, RLE all previous shift events
+            # before outputting the non-shift event.
+            output = np.concatenate([output, [event]], axis=0)
+
+        return output
 
     def _compute_spectrogram(self, ex):
         samples = spectrograms.flatten_frames(ex['inputs'])
@@ -325,18 +356,18 @@ class SlakhDataset(Dataset):
         return result
     
     def __getitem__(self, idx):
-        """
-        TODO: Should be good enough for training now. 
-        Although there is still one imperfection for reconstruction, 
-        which is the `start_time` for each segment seems to be wrong, hence holding the track back.
-        """
         row = self.df[idx]
         ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
         audio, sr = librosa.load(row['audio_path'], sr=None)
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
         row = self._tokenize(ns, audio, inst_names)
-        rows = self._split_frame(row, length=self.mel_length)
+
+        # NOTE: by default, this is self._split_frame(row, length=2000)
+        # this does not guarantee the chunks in `rows` to be contiguous.
+        # if we need to ensure that the chunks in `rows` to be contiguous, use:
+        # rows = self._split_frame(row, length=self.mel_length)
+        rows = self._split_frame(row)
         
         inputs, targets, frame_times, num_insts = [], [], [], []
         num_rows = 8
@@ -346,7 +377,7 @@ class SlakhDataset(Dataset):
             rows = rows[start_idx : start_idx + num_rows]
         
         predictions = []
-        wavs = []
+        # wavs = []
         fake_start = None
         for j, row in enumerate(rows):
             row = self._random_chunk(row)
@@ -357,24 +388,20 @@ class SlakhDataset(Dataset):
             # sf.write(f"test_{j}.wav", row["inputs"].reshape(-1,), 16000, "PCM_24")
 
             row = self._compute_spectrogram(row)
-            
-            # inst_tokens = row['targets']
-            # inst_tokens = inst_tokens[(inst_tokens >= 1132) & (inst_tokens <= 1259)]
-            # inst_tokens -= 1132
-            # inst_tokens = inst_tokens // 8
-            # inst_tokens = np.unique(inst_tokens).astype(int)
 
-            # inst_vec = np.zeros(16,)
-            # inst_vec[inst_tokens] = 1
-            # num_insts.append(inst_vec)
-
+            # -- random order augmentation --
+            # If turned on, comment out `is_redundant` code in `run_length_encoding`
+            # print("=======")
             # print(j, [self.get_token_name(t) for t in row["targets"]])
+            t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
+            t = np.array([self.token_to_idx(k) for k in t])
+            t = self._remove_redundant_tokens(t)
+            # print(j, [self.get_token_name(token) for token in t])
+            row["targets"] = t
             
             row = self._pad_length(row)
             inputs.append(row["inputs"])
             targets.append(row["targets"])   
-
-            # print('inputs', row["inputs"].shape)
 
             # ========== for reconstructing the MIDI from events =========== #
             # result = row["targets"]
@@ -388,17 +415,18 @@ class SlakhDataset(Dataset):
             # # print("start_times", row["input_times"][0])
             # if fake_start is None:
             #     fake_start = row["input_times"][0]
-            # predictions = []
+            # # predictions = []
             # predictions.append({
             #     'est_tokens': result.cpu().detach().numpy(),    # has to be numpy here, or else problematic
-            #     # 'start_time': row["input_times"][0] - fake_start,
-            #     'start_time': 0,
+            #     'start_time': row["input_times"][0] - fake_start,
+            #     # 'start_time': 0,
             #     'raw_inputs': []
             # })
-            # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
-            # result = metrics_utils.event_predictions_to_ns(
-            #     predictions, codec=self.codec, encoding_spec=encoding_spec)
-            # note_seq.sequence_proto_to_midi_file(result['est_ns'], f"test_out_{j}.mid")   
+
+            # # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
+            # # result = metrics_utils.event_predictions_to_ns(
+            # #     predictions, codec=self.codec, encoding_spec=encoding_spec)
+            # # note_seq.sequence_proto_to_midi_file(result['est_ns'], f"test_out_{j}.mid")   
             # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
 
              # ========== for reconstructing the MIDI from events =========== #
@@ -413,10 +441,44 @@ class SlakhDataset(Dataset):
         # num_insts = np.stack(num_insts)
 
         return torch.stack(inputs), torch.stack(targets)
-        # return torch.stack(inputs), torch.stack(targets), torch.from_numpy(num_insts)
     
     def __len__(self):
         return len(self.df)
+    
+    def randomize_tokens(self, token_lst):
+        shift_idx = [i for i in range(len(token_lst)) if "shift" in token_lst[i]]
+        if len(shift_idx) == 0:
+            return token_lst
+        res = token_lst[:shift_idx[0]]
+        for j in range(len(shift_idx) - 1):
+            res += [token_lst[shift_idx[j]]]
+            
+            start_idx = shift_idx[j]
+            end_idx = shift_idx[j + 1]
+            cur = token_lst[start_idx + 1 : end_idx]
+            cur_lst = []
+            ptr = 0
+            while ptr < len(cur):
+                t = cur[ptr]
+                if "program" in t:
+                    cur_lst.append([cur[ptr], cur[ptr + 1], cur[ptr + 2]])
+                    ptr += 3
+                elif "velocity" in t:
+                    cur_lst.append([cur[ptr], cur[ptr + 1]])
+                    ptr += 2
+
+            indices = np.arange(len(cur_lst))
+            np.random.shuffle(indices)
+
+            new_cur_lst = []
+            for idx in indices:
+                new_cur_lst.append(cur_lst[idx])
+            
+            new_cur_lst = [item for sublist in new_cur_lst for item in sublist]
+            res += new_cur_lst
+        
+        res += token_lst[shift_idx[-1]:]
+        return res
     
     def get_token_name(self, token_idx):
         token_idx = int(token_idx)
@@ -436,6 +498,22 @@ class SlakhDataset(Dataset):
             token = f"invalid_{token_idx}"
         
         return token
+    
+    def token_to_idx(self, token_str):
+        if "pitch" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1001
+        elif "velocity" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1129
+        elif "tie" in token_str:
+            token_idx = 1131
+        elif "program" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1132
+        elif "drum" in token_str:
+            token_idx = int(token_str.split("_")[1]) + 1260
+        elif "shift" in token_str:
+            token_idx = int(token_str.split("_")[1])
+
+        return token_idx
 
 
 def collate_fn(lst):

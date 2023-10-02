@@ -6,24 +6,35 @@ from typing import List
 import numpy as np
 from tqdm import tqdm
 from models.t5 import T5ForConditionalGeneration, T5Config
+# from models.t5_xl import T5WithXLDecoder, T5Config
+from models.t5_xl_instrument import T5WithXLDecoder, T5Config
 import torch.nn as nn
 import torch
-import librosa
 from contrib import spectrograms, vocabularies, note_sequences, metrics_utils
 import note_seq
-import matplotlib.pyplot as plt
 import traceback
+
+
+MIN_LOG_MEL = -12
+MAX_LOG_MEL = 5
 
 
 class InferenceHandler:
 
-    def __init__(self, weight_path, device=torch.device('cuda')) -> None:
-        config_path = f'{weight_path}/config.json'
-        weight_path = f'{weight_path}/mt3.pth'
+    def __init__(self, root_path, weight_path, device=torch.device('cuda')) -> None:
+        # config_path = f'{root_path}/config.json'
+        config_path = "config/mt3_config.json"
         with open(config_path) as f:
             config_dict = json.load(f)
         config = T5Config.from_dict(config_dict)
-        model: nn.Module = T5ForConditionalGeneration(config)
+        
+        if "xl" in weight_path:
+            model: nn.Module = T5WithXLDecoder(config)
+            self.contiguous_inference = True
+        else:
+            model: nn.Module = T5ForConditionalGeneration(config)
+            self.contiguous_inference = False
+        
         model.load_state_dict(torch.load(
             weight_path, map_location='cpu'), strict=True)
         model.eval()
@@ -36,12 +47,18 @@ class InferenceHandler:
         self.model = model
         self.model.to(self.device)
 
+        if "pretrained/mt3.pth" in weight_path:
+            self.mel_norm = False
+        else:
+            self.mel_norm = True
+
     def _audio_to_frames(self, audio):
         """Compute spectrogram frames from audio."""
         spectrogram_config = self.spectrogram_config
         frame_size = spectrogram_config.hop_width
         padding = [0, frame_size - len(audio) % frame_size]
         audio = np.pad(audio, padding, mode='constant')
+        print('audio', audio.shape, 'frame_size', frame_size)
         frames = spectrograms.split_audio(audio, spectrogram_config)
         num_frames = len(audio) // frame_size
         times = np.arange(num_frames) / \
@@ -78,7 +95,15 @@ class InferenceHandler:
             raw_i = samples
             outputs.append(i)
             outputs_raws.append(raw_i)
-        return np.stack(outputs, axis=0), np.stack(outputs_raws, axis=0)
+        
+        melspec, raw = np.stack(outputs, axis=0), np.stack(outputs_raws, axis=0)
+
+        # add normalization
+        # NOTE: for MT3 pretrained weights, we don't do mel_norm
+        if self.mel_norm:
+            melspec = np.clip(melspec, MIN_LOG_MEL, MAX_LOG_MEL)
+            melspec = (melspec - MIN_LOG_MEL) / (MAX_LOG_MEL - MIN_LOG_MEL)
+        return melspec, raw
 
     def _preprocess(self, audio):
         frames, frame_times = self._audio_to_frames(audio)
@@ -109,29 +134,19 @@ class InferenceHandler:
         invalid_programs = self.vocab.encode(invalid_programs)
         return [[p] for p in invalid_programs]
 
-    # TODO Force generate using subset of instrument instead of all.
-
     @torch.no_grad()
-    def get_encoder_outputs(self, audio_path, valid_programs=None):
-        audio, _ = librosa.load(audio_path, sr=self.SAMPLE_RATE)
-        if valid_programs is not None:
-            invalid_programs = self._get_program_ids(valid_programs)
-        else:
-            invalid_programs = None
-        inputs, frame_times = self._preprocess(audio)
-        inputs_tensor = torch.from_numpy(inputs)
-        results = []
-        inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times)
-        for idx, batch in tqdm(enumerate(inputs_tensor), total=len(inputs_tensor)):
-            batch = batch.to(self.device)
-            encoder_outputs = self.model.encoder(input_ids=batch)
-            hidden_states = encoder_outputs[0]
-            results.append(hidden_states)
-        
-        return torch.cat(results, dim=0)
-
-    @torch.no_grad()
-    def inference(self, audio, audio_path, outpath=None, valid_programs=None, num_beams=1, batch_size=5):
+    def inference(
+        self, 
+        audio, 
+        audio_path, 
+        outpath=None, 
+        valid_programs=None, 
+        num_beams=1, 
+        batch_size=5,
+    ):
+        """
+        `contiguous_inference` is True only for XL models as context from previous chunk is needed.
+        """
         try:
             if valid_programs is not None:
                 invalid_programs = self._get_program_ids(valid_programs)
@@ -140,30 +155,29 @@ class InferenceHandler:
             # print('preprocessing', audio_path)
             inputs, frame_times = self._preprocess(audio)
             inputs_tensor = torch.from_numpy(inputs)
-            encoder_outputs = []
             results = []
-            # print('batching', audio_path)
             inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times, batch_size=batch_size)
-            instruments = set()
-            # print('inferencing', audio_path)
+            print('inferencing', audio_path)
+
+            if self.contiguous_inference:
+                inputs_tensor = torch.cat(inputs_tensor, dim=0)
+                frame_times = [torch.tensor(k) for k in frame_times]
+                frame_times = torch.cat(frame_times, dim=0)
+                print('inputs_tensor', inputs_tensor.shape, frame_times.shape)
+                inputs_tensor = [inputs_tensor]
+                frame_times = [frame_times]
+
+            self.model.cuda()
             for idx, batch in enumerate(inputs_tensor):
                 batch = batch.to(self.device)
 
-                model_output = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
+                result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
                                             length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, 
                                             early_stopping=False, bad_words_ids=invalid_programs,
-                                            return_dict_in_generate=True, output_hidden_states=True)
+                                            use_cache=False,
+                                            )
                 
-                result = model_output.sequences
-                # result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
-                #                          length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, early_stopping=False, bad_words_ids=invalid_programs)
-
                 result = self._postprocess_batch(result)
-                single_event = self._to_event([result], [frame_times[idx]])
-
-                # play something easy first, instrument existence
-                instruments.update(set([note.program for note in single_event.notes if not note.is_drum]))
-
                 results.append(result)
             
             event = self._to_event(results, frame_times)
@@ -171,47 +185,11 @@ class InferenceHandler:
                 filename = audio_path.split('/')[-1].split('.')[0]
                 outpath = f'./out/{filename}.mid'
             os.makedirs('/'.join(outpath.split('/')[:-1]), exist_ok=True)
-            # print("saving", outpath)
+            print("saving", outpath)
             note_seq.sequence_proto_to_midi_file(event, outpath)
         
         except Exception as e:
             traceback.print_exc()
-
-    
-    def load_inputs_tensor(self, audio_path, valid_programs=None, num_beams=1):
-        print('loading', audio_path)
-        audio, _ = librosa.load(audio_path, sr=self.SAMPLE_RATE)
-        if valid_programs is not None:
-            invalid_programs = self._get_program_ids(valid_programs)
-        else:
-            invalid_programs = None
-        print('preprocessing', audio_path)
-        inputs, frame_times = self._preprocess(audio)
-        inputs_tensor = torch.from_numpy(inputs)
-        print('batching', audio_path)
-        inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times, batch_size=128)
-
-        return inputs_tensor, frame_times
-
-    @torch.no_grad()
-    def model_inference(self, inputs_tensor, frame_times, num_beams=1):
-        encoder_outputs = []
-        instruments = set()
-        for idx, batch in tqdm(enumerate(inputs_tensor), total=len(inputs_tensor)):
-            batch = batch.to(self.device)
-            enc_out = self.model.encoder(inputs_embeds=batch)
-            hidden_states = enc_out[0]
-            encoder_outputs.append(hidden_states)
-
-            result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
-                                         length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, early_stopping=False, bad_words_ids=None)
-            result = self._postprocess_batch(result)
-            single_event = self._to_event([result], [frame_times[idx]])
-
-            # play something easy first, instrument existence
-            instruments.update(set([note.program for note in single_event.notes if not note.is_drum]))
-        
-        return torch.cat(encoder_outputs, dim=0), instruments
 
     def _postprocess_batch(self, result):
         after_eos = torch.cumsum(
@@ -232,7 +210,6 @@ class InferenceHandler:
                     tokens == vocabularies.DECODED_EOS_ID)]
                 start_time = frame_times[i][j][0]
                 start_time -= start_time % (1 / self.codec.steps_per_second)
-                # print('tokens', tokens[:10], 'start_time', start_time)
                 predictions.append({
                     'est_tokens': tokens,
                     'start_time': start_time,

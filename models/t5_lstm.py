@@ -29,11 +29,6 @@ from tqdm import tqdm
 logger = logging.get_logger(__name__)
 
 
-@dataclass
-class Seq2SeqLMOutputNumInsts(Seq2SeqLMOutput):
-    loss_inst: Optional[torch.FloatTensor] = None
-
-
 class T5ForConditionalGeneration(T5PreTrainedModel):
     _keys_to_ignore_on_load_missing = [
         r"encoder\.embed_tokens\.weight",
@@ -70,8 +65,8 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         self.decoder = T5Stack(decoder_config, self.decoder_embed_tokens)
 
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
-        # self.mean_pool = nn.AdaptiveAvgPool1d(1)
-        # self.num_inst_cls = nn.Linear(config.d_model, 16)
+        self.gru = nn.GRU(config.d_model, config.d_model, batch_first=True, bidirectional=True)
+        self.gru_linear = nn.Linear(config.d_model * 2, config.d_model)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -114,6 +109,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        h0: Optional[torch.FloatTensor] = None,
     ):
         # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
         if head_mask is not None and decoder_head_mask is None:
@@ -145,11 +141,28 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
 
         hidden_states = encoder_outputs[0]
 
+        # ======= encoder recurrent part ======== #
+        # batch_size = hidden_states.shape[0]
+        # gru_in = hidden_states.reshape(-1, self.config.hidden_size)
+        # gru_out, _ = self.gru(gru_in)
+        # gru_out = self.gru_linear(gru_out)
+        # gru_out = gru_out.reshape(batch_size, -1, self.config.hidden_size)
+
+        # new_hidden_states = hidden_states + gru_out
+        # ======= encoder recurrent part ======== #
+
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
             # get decoder inputs from shifting lm labels to the right
             decoder_input_ids = self._shift_right(labels)
 
+            # NOTE: can choose to add noise to decoder input ids
+            # decoder_input_ids = self.add_pix2seq_noise(decoder_input_ids)
+
         # Decode
+        # if past_key_values is None:
+        #     print('past_key_values', past_key_values)
+        # else:
+        #     print('past_key_values', past_key_values.shape)
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
@@ -167,17 +180,106 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
 
         sequence_output = decoder_outputs[0]
 
+        # ======= decoder recurrent part ======== #
+        # print("sequence_output", sequence_output.shape)
+        batch_size = sequence_output.shape[0]
+        gru_in = sequence_output.reshape(-1, self.config.hidden_size)
+        # print("gru_in", gru_in.shape)
+        gru_out, _ = self.gru(gru_in)
+        gru_out = self.gru_linear(gru_out)
+        gru_out = gru_out.reshape(batch_size, -1, self.config.hidden_size)
+        # print("gru_out", gru_out.shape)
+
+        new_sequence_output = sequence_output + gru_out
+        # ======= decoder recurrent part ======== #
+
         if self.config.tie_word_embeddings:
             # Rescale output before projecting on vocab
             # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
-            sequence_output = sequence_output * (self.model_dim**-0.5)
+            new_sequence_output = new_sequence_output * (self.model_dim**-0.5)
         
-        lm_logits = self.lm_head(sequence_output)
+        lm_logits = self.lm_head(new_sequence_output)
 
         # mean_hidden_states = self.mean_pool(sequence_output.transpose(1, 2)).squeeze(-1)
         # inst_cls_logits = self.num_inst_cls(mean_hidden_states)
         
         return lm_logits, encoder_outputs, decoder_outputs
+    
+    def add_pix2seq_noise(self, decoder_input_ids):
+        """
+        decoder_input_ids: (bs, seq_len)
+        """
+        eos_token_id = 1
+        for i in range(decoder_input_ids.shape[0]):
+            eos_idx = (decoder_input_ids[i] == self.config.eos_token_id).nonzero().item()
+            noise_length = decoder_input_ids.shape[1] - eos_idx
+            noise_tokens = self.generate_pix2seq_noise(noise_length)
+            decoder_input_ids[i, eos_idx:] = noise_tokens.long()
+        return decoder_input_ids
+    
+    def generate_pix2seq_noise(self, length):
+        """
+                     / drum       - velocity - drum  
+        shift - note
+                     \ instrument - program  - velocity - pitch
+        """
+        # NOTE: check if the range is correct for token
+
+        noise_tokens = torch.zeros(length)
+        state = "shift"
+
+        i = 0
+        while i < length:
+            # first add a shift token
+            if state == "shift":
+                shift = torch.randint(0, 1000, (1,))[0]
+                noise_tokens[i] = shift
+                i += 1
+                state = "note"
+
+            if state == "note":
+                if torch.rand(1)[0] < 0.5:
+                    state = "drum"
+                else:
+                    state = "instrument"
+            
+            if state == "drum":
+                velocity = torch.randint(1129, 1130, (1,))[0]  
+                noise_tokens[i] = velocity
+                i += 1
+                state = "drum_note"
+            
+            if state == "drum_note":
+                drum = torch.randint(1260, 1387, (1,))[0]
+                noise_tokens[i] = drum
+                i += 1
+                if torch.rand(1)[0] < 0.5:
+                    state = "shift"
+                else:
+                    state = "note"
+            
+            if state == "instrument":
+                program = torch.randint(1132, 1259, (1,))[0]
+                noise_tokens[i] = program
+                i += 1
+                state = "instrument_vel"
+            
+            if state == "instrument_vel":
+                velocity = torch.randint(1129, 1130, (1,))[0]
+                noise_tokens[i] = velocity
+                i += 1
+                state = "instrument_pitch"
+            
+            if state == "instrument_pitch":
+                pitch = torch.randint(1001, 1128, (1,))[0]
+                noise_tokens[i] = pitch
+                i += 1
+                if torch.rand(1)[0] < 0.5:
+                    state = "shift"
+                else:
+                    state = "note"
+        
+        return noise_tokens
 
     def forward(
         self,
@@ -198,6 +300,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         num_insts: Optional[torch.LongTensor] = None,
+        h0: Optional[torch.FloatTensor] = None,
     ) -> Union[Tuple[torch.FloatTensor], Seq2SeqLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -244,6 +347,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            h0=h0,
         )
 
         loss = None
@@ -271,9 +375,9 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
             encoder_hidden_states=encoder_outputs.hidden_states,
             encoder_attentions=encoder_outputs.attentions,
-        )    
+        )
     
-    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
+    def generate(self, inputs, max_length=1024, h0=None, **kwargs):
         batch_size = inputs.shape[0]
         inputs_embeds = self.proj(inputs)
         encoder_outputs = self.encoder(
@@ -282,6 +386,15 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         )
         hidden_states = encoder_outputs[0]
 
+        # ======= encoder recurrent part ======== #
+        # gru_in = hidden_states.view(-1, self.config.hidden_size)
+        # gru_out, _ = self.gru(gru_in)
+        # gru_out = self.gru_linear(gru_out)
+        # gru_out = gru_out.view(batch_size, -1, self.config.hidden_size)
+
+        # hidden_states += gru_out
+        # ======= encoder recurrent part ======== #
+
         decoder_input_ids_start = torch.ones((batch_size, 1), dtype=torch.long, device=self.device) * \
                                     self.config.decoder_start_token_id
         
@@ -289,42 +402,33 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=self.device)
         eos_token_id_tensor = torch.tensor(self.config.eos_token_id).to(self.device)
         
-        for l in range(max_length):
+        for l in tqdm(range(max_length)):
             decoder_outputs = self.decoder(
                 input_ids=decoder_input_ids_start,
                 encoder_hidden_states=hidden_states,
-                # output_hidden_states=output_hidden_states,
                 return_dict=True,
             )
-
-            # handle output hidden states
-            # if output_hidden_states:
-            #     hidden_states = decoder_outputs.hidden_states # (num_layers + 1, batch_size, 1, hidden_size)
-            #     print('hidden states', hidden_states[0].shape)
-            #     hidden_states = [torch.cat(layer, dim=0) for layer in hidden_states]
-            #     print('dec hidden states', hidden_states[0].shape)
-            #     hidden_states = torch.cat(hidden_states, dim=0)
-            #     print('dec hidden states', hidden_states.shape)
-            
             sequence_output = decoder_outputs[0]
-            lm_logits = self.lm_head(sequence_output)
-            next_tokens = torch.argmax(lm_logits[:, -1, :].unsqueeze(1), dim=-1)
-
-            next_tokens = next_tokens * unfinished_sequences.unsqueeze(-1) + self.config.pad_token_id * (1 - unfinished_sequences.unsqueeze(-1))
-            eos_indices = torch.where(next_tokens == self.config.eos_token_id)[0]
-            unfinished_sequences[eos_indices] = 0
-            decoder_input_ids_start = torch.cat([decoder_input_ids_start, next_tokens], dim=-1)
-
-            # stop when each sentence is finished
-            if unfinished_sequences.max() == 0:
-                break
             
-            # print(l, decoder_input_ids_start.shape)
         
-        if output_hidden_states:
-            return decoder_input_ids_start, hidden_states
-        else:
-            return decoder_input_ids_start
+        
+        lm_logits = self.lm_head(sequence_output)
+        next_tokens = torch.argmax(lm_logits[:, -1, :].unsqueeze(1), dim=-1)
+
+        next_tokens = next_tokens * unfinished_sequences.unsqueeze(-1) + self.config.pad_token_id * (1 - unfinished_sequences.unsqueeze(-1))
+        # print('next_tokens', next_tokens.shape, 'decoder_input_ids_start', decoder_input_ids_start.shape)
+        eos_indices = torch.where(next_tokens == self.config.eos_token_id)[0]
+        unfinished_sequences[eos_indices] = 0
+        # print('eos_indices', eos_indices, eos_indices.shape, unfinished_sequences)
+        decoder_input_ids_start = torch.cat([decoder_input_ids_start, next_tokens], dim=-1)
+
+        # stop when each sentence is finished
+        if unfinished_sequences.max() == 0:
+            break
+        
+        # print(l, decoder_input_ids_start.shape)
+        
+        return decoder_input_ids_start, h
     
     def prepare_inputs_for_generation(
         self,
@@ -740,3 +844,17 @@ class FixedPositionalEmbedding(nn.Module):
         y = rearrange(emb, 'n d -> () n d')
         y = y[:, offset:offset + seq, :]
         return y
+
+
+if __name__ == "__main__":
+    import json
+    from transformers import T5Config
+
+    with open('config/mt3_config.json') as f:
+            config_dict = json.load(f)
+    config = T5Config.from_dict(config_dict)
+    model = T5ForConditionalGeneration(config)
+
+    x = torch.rand(2, 256, 512)
+    y = torch.randint(1, 10, (2, 1024))
+    model(inputs=x, labels=y)

@@ -1,6 +1,6 @@
 """
-MT3 baseline training. 
-To use random order, use `dataset.dataset_2_random`. Or else, use `dataset.dataset_2`.
+MT3 with random order and pix2seq noise training. 
+Uses `dataset_2_random_noise`.
 """
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
@@ -12,7 +12,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.callbacks import TQDMProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger
 from transformers import T5Config
-from dataset.dataset_2_random import SlakhDataset, collate_fn
+from dataset.dataset_2_random_noise import SlakhDataset, collate_fn
 from torch.utils.data import DataLoader
 from models.t5 import T5ForConditionalGeneration
 import torch.nn as nn
@@ -43,18 +43,24 @@ class MT3Net(pl.LightningModule):
         return self.model.forward(*args, **kwargs)
 
     def training_step(self, batch, batch_idx):
-        inputs, targets = batch
-        outputs = self.forward(inputs=inputs, labels=targets)
+        inputs, decoder_inputs, targets = batch
+        outputs = self.forward(
+            inputs=inputs, 
+            decoder_input_ids=decoder_inputs, 
+            labels=targets
+        )
         self.log('train_loss', outputs.loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        mlflow.log_metric("train_loss", outputs.loss)
         return outputs.loss
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        inputs, targets = batch
-        outputs = self.forward(inputs=inputs, labels=targets)
+        inputs, decoder_inputs, targets = batch
+        outputs = self.forward(
+            inputs=inputs, 
+            decoder_input_ids=decoder_inputs, 
+            labels=targets
+        )
         self.log('val_loss', outputs.loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        mlflow.log_metric("val_loss", outputs.loss)
         return outputs.loss
 
     def configure_optimizers(self):
@@ -73,11 +79,8 @@ class MT3Net(pl.LightningModule):
         }
         return [optimizer], [schedule]
 
-        # we follow MT3 to use fixed learning rate
-        # NOTE: we find this to not work :(
-        # return AdamW(self.model.parameters(), self.config.lr)
-
     def train_dataloader(self):
+        train_path = self.config.data.train_path
         dataset = SlakhDataset(root_dir='/data/slakh2100_flac_redux/train/', mel_length=self.config.mel_length, event_length=self.config.event_length, **self.config.data.config)
         train_loader = DataLoader(
             dataset, 
@@ -88,6 +91,7 @@ class MT3Net(pl.LightningModule):
         return train_loader
 
     def val_dataloader(self):
+        test_path = self.config.data.test_path
         dataset = SlakhDataset(root_dir='/data/slakh2100_flac_redux/validation/', mel_length=self.config.mel_length, event_length=self.config.event_length, **self.config.data.config)
         val_loader = DataLoader(
             dataset, 
@@ -161,7 +165,7 @@ if __name__ == "__main__":
     result_dir = ""
     if args.mode == "train":
         datetime_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_dir = f"logs/results_norm_randomorder_{datetime_str}"
+        result_dir = f"logs/results_norm_randomorder_pix2seq_{datetime_str}"
         print('Creating: ', result_dir)
         os.makedirs(result_dir, exist_ok=False)
         shutil.copy(conf_file, f'{result_dir}/config.yaml')

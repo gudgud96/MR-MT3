@@ -1,5 +1,5 @@
-num_epochs: 100
-warmup_steps: 1289
+num_epochs: 400
+warmup_steps: 5160
 
 data:
   train_path: /data/slakh2100_flac_redux/train
@@ -19,7 +19,7 @@ event_length: 1024
 mel_length: 256
 pretrained: pretrained/mt3.pth
 
-lr: 2e-5
+lr: 6e-5
 
 per_device_batch_size: 4 # 64
 gradient_clip_val: 0

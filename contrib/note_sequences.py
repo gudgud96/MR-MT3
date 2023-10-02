@@ -303,7 +303,7 @@ def _add_note_to_sequence(
     end_time = max(end_time, start_time + MIN_NOTE_DURATION)
     ns.notes.add(
         start_time=start_time, end_time=end_time,
-        pitch=pitch, velocity=velocity, program=program, is_drum=is_drum)
+        pitch=int(pitch), velocity=int(velocity), program=int(program), is_drum=is_drum)
     ns.total_time = max(ns.total_time, end_time)
 
 
