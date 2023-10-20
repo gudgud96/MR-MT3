@@ -1,8 +1,11 @@
 from glob import glob
 import yaml
 import json
+import sys
+sys.path.insert(0, '..')
 
 from contrib.preprocessor import _SLAKH_CLASS_PROGRAMS
+
 
 _SLAKH_CLASS_PROGRAMS
 
@@ -39,6 +42,6 @@ def main(root_path):
 
 
 if __name__ == '__main__':
-    main('/data/slakh2100_flac_redux/train')
-    main('/data/slakh2100_flac_redux/validation')
-    main('/data/slakh2100_flac_redux/test')
+    main('/workspace/data/dataset/slakh2100_flac_redux/train')
+    main('/workspace/data/dataset/slakh2100_flac_redux/validation')
+    main('/workspace/data/dataset/slakh2100_flac_redux/test')
