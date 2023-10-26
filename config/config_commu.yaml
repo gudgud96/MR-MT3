@@ -1,0 +1,28 @@
+num_epochs: 400
+# warmup_steps: 5160
+warmup_steps: 32250
+
+data:
+  train_path: /data/slakh2100_flac_redux/train
+  test_path: /data/slakh2100_flac_redux/validation
+  config:
+    midi_folder: MIDI
+    inst_filename: inst_names.json
+    audio_filename: mix_16k.wav
+  # train_path: /home/kunato/mt3/temp_data
+  # test_path: /home/kunato/mt3/temp_data
+  # config:
+  #   midi_folder: midi
+  #   inst_filename: inst_names_dict.json
+  #   audio_filename: audio.wav
+
+event_length: 256
+mel_length: 256
+pretrained: pretrained/mt3.pth
+
+lr: 1e-4
+
+per_device_batch_size: 4 # 64
+gradient_clip_val: 0
+grad_accum: 1
+gpus: 1

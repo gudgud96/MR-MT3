@@ -6,8 +6,8 @@ from typing import List
 import numpy as np
 from tqdm import tqdm
 from models.t5 import T5ForConditionalGeneration, T5Config
-# from models.t5_xl import T5WithXLDecoder, T5Config
-from models.t5_xl_instrument import T5WithXLDecoder, T5Config
+from models.t5_xl import T5WithXLDecoder, T5Config
+# from models.t5_xl_instrument import T5WithXLDecoder, T5Config
 import torch.nn as nn
 import torch
 from contrib import spectrograms, vocabularies, note_sequences, metrics_utils
@@ -143,6 +143,7 @@ class InferenceHandler:
         valid_programs=None, 
         num_beams=1, 
         batch_size=5,
+        max_length=1024,
     ):
         """
         `contiguous_inference` is True only for XL models as context from previous chunk is needed.
@@ -171,7 +172,7 @@ class InferenceHandler:
             for idx, batch in enumerate(inputs_tensor):
                 batch = batch.to(self.device)
 
-                result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
+                result = self.model.generate(inputs=batch, max_length=max_length, num_beams=num_beams, do_sample=False,
                                             length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, 
                                             early_stopping=False, bad_words_ids=invalid_programs,
                                             use_cache=False,
