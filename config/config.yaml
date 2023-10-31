@@ -1,19 +1,7 @@
 num_epochs: 400
 warmup_steps: 5160
-
-data:
-  train_path: /data/slakh2100_flac_redux/train
-  test_path: /data/slakh2100_flac_redux/validation
-  config:
-    midi_folder: MIDI
-    inst_filename: inst_names.json
-    audio_filename: mix_16k.wav
-  # train_path: /home/kunato/mt3/temp_data
-  # test_path: /home/kunato/mt3/temp_data
-  # config:
-  #   midi_folder: midi
-  #   inst_filename: inst_names_dict.json
-  #   audio_filename: audio.wav
+devices: 1
+mode: "train"
 
 event_length: 1024
 mel_length: 256
@@ -21,7 +9,61 @@ pretrained: pretrained/mt3.pth
 
 lr: 6e-5
 
+# are these used anywhere?
 per_device_batch_size: 4 # 64
 gradient_clip_val: 0
 grad_accum: 1
-gpus: 1
+
+data:
+  train:
+    root_dir: "/data2/kinwai/slakh2100_flac_redux/train"
+    mel_length: ${mel_length}
+    event_length: ${event_length}
+    midi_folder: MIDI
+    inst_filename: inst_names.json
+    audio_filename: mix_16k.wav
+  val:
+    root_dir: "/data2/kinwai/slakh2100_flac_redux/validation/"
+    mel_length: ${mel_length}
+    event_length: ${event_length}
+    midi_folder: MIDI
+    inst_filename: inst_names.json
+    audio_filename: mix_16k.wav    
+  test:
+    root_dir: "/data/slakh2100_flac_redux/validation"
+
+  # train_path: /home/kunato/mt3/temp_data
+  # test_path: /home/kunato/mt3/temp_data
+  # config:
+  #   midi_folder: midi
+  #   inst_filename: inst_names_dict.json
+  #   audio_filename: audio.wav
+
+dataloader:
+  train:
+    batch_size: 1
+    num_workers: 12
+  val:
+    batch_size: 1
+    num_workers: 12  
+
+modelcheckpoint:
+  monitor: 'val_loss'
+  mode: 'min'
+  save_last: True
+  save_top_k: 5
+  save_weights_only: False
+  filename: '{epoch}-{step}-{val_loss:.4f}'
+
+trainer:
+  precision: 32
+  max_epochs: ${num_epochs}
+  accelerator: 'gpu'
+  accumulate_grad_batches: ${grad_accum}
+  num_sanity_val_steps: 2
+  log_every_n_steps: 645
+  strategy: "ddp_find_unused_parameters_false"
+  devices: ${devices}
+
+defaults:
+  - model: mt3_config
