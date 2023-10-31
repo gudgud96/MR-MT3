@@ -10,9 +10,11 @@
 
 ## Training
 
-`python3 mt3_net.py`
+`python3 mt3_net.py devices=[2,3] num_epochs=400`
 
-After training is done, run `python3 mt3_net.py --mode test --path <checkpoint_path.ckpt>` to convert `.ckpt` to `.pth`.
+with hydra, config can be overwritten in the CLI.
+
+After training is done, run `python3 mt3_net.py mode=test --path <checkpoint_path.ckpt>` to convert `.ckpt` to `.pth`.
 
 ## Evaluation
 `python3 analysis.py` -> `python3 evaluate.py`
