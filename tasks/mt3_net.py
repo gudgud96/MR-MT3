@@ -9,11 +9,11 @@ from utils import get_cosine_schedule_with_warmup
 
 class MT3Net(pl.LightningModule):
 
-    def __init__(self, config, result_dir='./results'):
+    def __init__(self, config, optim_cfg):
         super().__init__()
         self.config = config
-        self.result_dir = result_dir
-        T5config = T5Config.from_dict(OmegaConf.to_container(self.config.model))
+        self.optim_cfg = optim_cfg
+        T5config = T5Config.from_dict(OmegaConf.to_container(self.config))
         self.model: nn.Module = T5ForConditionalGeneration(T5config)
 
     def forward(self, *args, **kwargs):
@@ -33,14 +33,14 @@ class MT3Net(pl.LightningModule):
         return outputs.loss
 
     def configure_optimizers(self):
-        optimizer = AdamW(self.model.parameters(), self.config.lr)
-        warmup_step = int(self.config.warmup_steps)
+        optimizer = AdamW(self.model.parameters(), self.optim_cfg.lr)
+        warmup_step = int(self.optim_cfg.warmup_steps)
         print('warmup step: ', warmup_step)
         schedule = {
             'scheduler': get_cosine_schedule_with_warmup(
                 optimizer=optimizer, 
                 num_warmup_steps=warmup_step, 
-                num_training_steps=1289*self.config.num_epochs,
+                num_training_steps=1289*self.optim_cfg.num_epochs,
                 min_lr=5e-5
             ),
             'interval': 'step',

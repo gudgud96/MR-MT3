@@ -12,7 +12,6 @@ from pytorch_lightning.callbacks import TQDMProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger
 from dataset.dataset_2_random import SlakhDataset, collate_fn
 from torch.utils.data import DataLoader
-import tasks as Tasks
 
 import torch
 import pytorch_lightning as pl
@@ -24,7 +23,7 @@ import hydra
 @hydra.main(config_path="config", config_name="config")
 # def main(config, model_config, result_dir, mode, path):
 def main(cfg):
-    model = getattr(Tasks, cfg.model_type)(cfg)
+    model = hydra.utils.instantiate(cfg.model, optim_cfg=cfg.optim)
     logger = TensorBoardLogger(save_dir='.',
                                name=cfg.model_type)
     # TODO: use config file name 
