@@ -2,6 +2,7 @@ num_epochs: 400
 devices: 1
 mode: "train"
 model_type: ${hydra:runtime.choices.model} # parse the filename of the config
+dataset_type: ${hydra:runtime.choices.dataset}
 seed: 365
 
 event_length: 1024
@@ -18,24 +19,6 @@ per_device_batch_size: 4 # 64
 gradient_clip_val: 0
 grad_accum: 1
 
-data:
-  train:
-    root_dir: "/data2/kinwai/slakh2100_flac_redux/train"
-    mel_length: ${mel_length}
-    event_length: ${event_length}
-    midi_folder: MIDI
-    inst_filename: inst_names.json
-    audio_filename: mix_16k.wav
-  val:
-    root_dir: "/data2/kinwai/slakh2100_flac_redux/validation/"
-    mel_length: ${mel_length}
-    event_length: ${event_length}
-    midi_folder: MIDI
-    inst_filename: inst_names.json
-    audio_filename: mix_16k.wav    
-  test:
-    root_dir: "/data/slakh2100_flac_redux/validation"
-
   # train_path: /home/kunato/mt3/temp_data
   # test_path: /home/kunato/mt3/temp_data
   # config:
@@ -45,7 +28,7 @@ data:
 
 dataloader:
   train:
-    batch_size: 2
+    batch_size: 1
     num_workers: 12
   val:
     batch_size: 1
@@ -71,3 +54,4 @@ trainer:
 
 defaults:
   - model: MT3Net
+  - dataset: Slakh

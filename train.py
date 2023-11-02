@@ -8,7 +8,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.callbacks import TQDMProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger
-from dataset.dataset_2_random import SlakhDataset, collate_fn
 from torch.utils.data import DataLoader
 
 import torch
@@ -26,7 +25,7 @@ def main(cfg):
 
     model = hydra.utils.instantiate(cfg.model, optim_cfg=cfg.optim)
     logger = TensorBoardLogger(save_dir='.',
-                               name=cfg.model_type)
+                               name=f"{cfg.model_type}_{cfg.dataset_type}")
     
     # sanity check to make sure the correct model is used
     assert cfg.model_type == cfg.model._target_.split('.')[-1]
@@ -44,15 +43,16 @@ def main(cfg):
         )
 
         train_loader = DataLoader(
-            SlakhDataset(**cfg.data.train), 
+            hydra.utils.instantiate(cfg.dataset.train),
+            # SlakhDataset(**cfg.data.train), 
             **cfg.dataloader.train,
-            collate_fn=collate_fn
+            collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
         )
 
         val_loader = DataLoader(
-            SlakhDataset(**cfg.data.val), 
+            hydra.utils.instantiate(cfg.dataset.val),
             **cfg.dataloader.val,
-            collate_fn=collate_fn
+            collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
         )
 
         trainer.fit(model, train_loader, val_loader)
