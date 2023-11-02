@@ -24,10 +24,9 @@ import hydra
 @hydra.main(config_path="config", config_name="config")
 # def main(config, model_config, result_dir, mode, path):
 def main(cfg):
-    # model = MT3Net(cfg)
-    model = getattr(Tasks, 'MT3Net')(cfg)
+    model = getattr(Tasks, cfg.model_type)(cfg)
     logger = TensorBoardLogger(save_dir='.',
-                               name='dummy_run')
+                               name=cfg.model_type)
     # TODO: use config file name 
     # https://stackoverflow.com/a/70070004/9793316
 

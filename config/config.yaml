@@ -2,6 +2,7 @@ num_epochs: 400
 warmup_steps: 5160
 devices: 1
 mode: "train"
+model_type: ${hydra:runtime.choices.model} # parse the filename of the config
 
 event_length: 1024
 mel_length: 256
@@ -41,7 +42,7 @@ data:
 
 dataloader:
   train:
-    batch_size: 1
+    batch_size: 2
     num_workers: 12
   val:
     batch_size: 1
@@ -61,9 +62,9 @@ trainer:
   accelerator: 'gpu'
   accumulate_grad_batches: ${grad_accum}
   num_sanity_val_steps: 2
-  log_every_n_steps: 645
+  log_every_n_steps: 100
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
 
 defaults:
-  - model: mt3_config
+  - model: MT3Net
