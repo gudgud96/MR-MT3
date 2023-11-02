@@ -33,7 +33,8 @@ class SlakhDataset(Dataset):
         audio_filename='mix.flac', 
         midi_folder='MIDI', 
         inst_filename='inst_names.json',
-        shuffle=True
+        shuffle=True,
+        num_rows_per_batch=8
     ) -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
@@ -51,6 +52,7 @@ class SlakhDataset(Dataset):
         self.ignore_pitch_bends = ignore_pitch_bends
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
+        self.num_rows_per_batch = num_rows_per_batch
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
@@ -295,6 +297,10 @@ class SlakhDataset(Dataset):
     def _split_frame(self, row, length=2000):
         rows = []
         input_length = row['inputs'].shape[0]
+        # print('input_length', input_length, 'length', length)
+
+        # chunk the audio into chunks of `length` = 2000
+        # during _random_chunk, within each chunk, randomly select a segment = self.mel_length
         for split in range(0, input_length, length):
             if split + length >= input_length:
                 continue
@@ -370,11 +376,10 @@ class SlakhDataset(Dataset):
         rows = self._split_frame(row)
         
         inputs, targets, frame_times, num_insts = [], [], [], []
-        num_rows = 8
-        if len(rows) > num_rows:
-            start_idx = random.randint(0, len(rows) - num_rows)
+        if len(rows) > self.num_rows_per_batch:
+            start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
             # start_idx = 0
-            rows = rows[start_idx : start_idx + num_rows]
+            rows = rows[start_idx : start_idx + self.num_rows_per_batch]
         
         predictions = []
         # wavs = []
@@ -412,13 +417,14 @@ class SlakhDataset(Dataset):
             # result -= self.vocab.num_special_tokens()
             # result = torch.where(after_eos.bool(), -1, result)
 
-            # # print("start_times", row["input_times"][0])
+            # print("start_times", row["input_times"][0])
             # if fake_start is None:
             #     fake_start = row["input_times"][0]
             # # predictions = []
             # predictions.append({
             #     'est_tokens': result.cpu().detach().numpy(),    # has to be numpy here, or else problematic
-            #     'start_time': row["input_times"][0] - fake_start,
+            #     # 'start_time': row["input_times"][0] - fake_start,
+            #     'start_time': j * 2.048,
             #     # 'start_time': 0,
             #     'raw_inputs': []
             # })

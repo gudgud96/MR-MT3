@@ -1,4 +1,4 @@
-num_epochs: 400
+num_epochs: 800
 devices: 1
 mode: "train"
 model_type: ${hydra:runtime.choices.model} # parse the filename of the config
@@ -11,10 +11,10 @@ mel_length: 256
 pretrained: pretrained/mt3.pth
 
 optim:
-  lr: 6e-5
-  warmup_steps: 5160
+  lr: 2e-4
+  warmup_steps: 64500
   num_epochs: ${num_epochs}
-  min_lr: 5e-5
+  min_lr: 1e-4
 
 grad_accum: 1
 
@@ -47,3 +47,4 @@ trainer:
 defaults:
   - model: MT3Net
   - dataset: Slakh
+  # TODO: we need to specify num_samples_per_batch here from 8 to 12
