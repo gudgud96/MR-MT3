@@ -21,16 +21,30 @@ class MT3Net(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         inputs, targets = batch
-        outputs = self.forward(inputs=inputs, labels=targets)
-        self.log('train_loss', outputs.loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
-        return outputs.loss
+        lm_logits = self.forward(inputs=inputs, labels=targets)
+
+        if targets is not None:
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            loss = loss_fct(
+                lm_logits.view(-1, lm_logits.size(-1)), targets.view(-1)
+            )
+        self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
+        return loss
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
         inputs, targets = batch
-        outputs = self.forward(inputs=inputs, labels=targets)
-        self.log('val_loss', outputs.loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        return outputs.loss
+        lm_logits = self.forward(inputs=inputs, labels=targets)
+
+        if targets is not None:
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            loss = loss_fct(
+                lm_logits.view(-1, lm_logits.size(-1)), targets.view(-1)
+            )
+        self.log('val_loss', loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        
+        # no need to use it in this stage
+        # return loss
 
     def configure_optimizers(self):
         optimizer = AdamW(self.model.parameters(), self.optim_cfg.lr)
