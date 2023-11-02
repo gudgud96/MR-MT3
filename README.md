@@ -10,11 +10,24 @@
 
 ## Training
 
-`python3 mt3_net.py devices=[2,3] num_epochs=400`
+### Training model MT3Net with dataset Slakh
+```
+python train.py num_epochs=1 devices=[0,1] model=MT3Net dataset=Slakh
+```
+
+### Training model MT3NetXL with dataset SlakhXL
+```
+python train.py num_epochs=1 devices=[0,1] model=MT3NetXL dataset=SlakhXL
+```
+
+### Training model MT3Pix2Seq with dataset SlakhPix2Seq
+```
+python train.py num_epochs=1 devices=[5] model=MT3NetPix2Seq dataset=SlakhPix2Seq
+```
 
 with hydra, config can be overwritten in the CLI.
 
-After training is done, run `python3 mt3_net.py mode=test --path <checkpoint_path.ckpt>` to convert `.ckpt` to `.pth`.
+After training is done, run `python3 mt3_net.py mode=test path=<checkpoint_path.ckpt>` to convert `.ckpt` to `.pth`.
 
 ## Evaluation
 `python3 analysis.py` -> `python3 evaluate.py`
