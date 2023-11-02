@@ -16,7 +16,7 @@ for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 
 
-dir = sorted(glob.glob("/data/slakh2100_flac_redux/test/*/mix_16k.wav"))
+dir = sorted(glob.glob("/workspace/data/dataset/slakh2100_flac_redux/test/*/mix_16k.wav"))
 handler = InferenceHandler(
     root_path='./pretrained',
     # weight_path='logs/results_norm_20230823_113404/version_0/checkpoints/epoch=406-step=262515-val_loss=1.1770.pth',

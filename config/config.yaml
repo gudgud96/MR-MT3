@@ -1,13 +1,25 @@
 num_epochs: 400
-warmup_steps: 5160
+devices: 1
+mode: "train"
+model_type: ${hydra:runtime.choices.model} # parse the filename of the config
+dataset_type: ${hydra:runtime.choices.dataset}
+seed: 365
+path:
 
-data:
-  train_path: /data/slakh2100_flac_redux/train
-  test_path: /data/slakh2100_flac_redux/validation
-  config:
-    midi_folder: MIDI
-    inst_filename: inst_names.json
-    audio_filename: mix_16k.wav
+event_length: 1024
+mel_length: 256
+pretrained: pretrained/mt3.pth
+
+optim:
+  lr: 6e-5
+  warmup_steps: 5160
+  num_epochs: ${num_epochs}
+
+# are these used anywhere?
+per_device_batch_size: 4 # 64
+gradient_clip_val: 0
+grad_accum: 1
+
   # train_path: /home/kunato/mt3/temp_data
   # test_path: /home/kunato/mt3/temp_data
   # config:
@@ -15,13 +27,32 @@ data:
   #   inst_filename: inst_names_dict.json
   #   audio_filename: audio.wav
 
-event_length: 1024
-mel_length: 256
-pretrained: pretrained/mt3.pth
+dataloader:
+  train:
+    batch_size: 1
+    num_workers: 12
+  val:
+    batch_size: 1
+    num_workers: 12  
 
-lr: 6e-5
+modelcheckpoint:
+  monitor: 'val_loss'
+  mode: 'min'
+  save_last: True
+  save_top_k: 5
+  save_weights_only: False
+  filename: '{epoch}-{step}-{val_loss:.4f}'
 
-per_device_batch_size: 4 # 64
-gradient_clip_val: 0
-grad_accum: 1
-gpus: 1
+trainer:
+  precision: 32
+  max_epochs: ${num_epochs}
+  accelerator: 'gpu'
+  accumulate_grad_batches: ${grad_accum}
+  num_sanity_val_steps: 2
+  log_every_n_steps: 100
+  strategy: "ddp_find_unused_parameters_false"
+  devices: ${devices}
+
+defaults:
+  - model: MT3Net
+  - dataset: Slakh
