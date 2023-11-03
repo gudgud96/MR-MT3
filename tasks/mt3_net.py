@@ -40,7 +40,7 @@ class MT3Net(pl.LightningModule):
             'scheduler': get_cosine_schedule_with_warmup(
                 optimizer=optimizer, 
                 num_warmup_steps=warmup_step, 
-                num_training_steps=1289*self.optim_cfg.num_epochs,
+                num_training_steps=self.optim_cfg.num_steps_per_epoch * self.optim_cfg.num_epochs,
                 min_lr=self.optim_cfg.min_lr
             ),
             'interval': 'step',

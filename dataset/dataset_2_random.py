@@ -4,7 +4,6 @@ from torch.utils.data import Dataset, DataLoader
 import tensorflow as tf
 tf.config.set_visible_devices([], 'GPU')
 
-from itertools import cycle
 import json
 import random
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -89,7 +88,6 @@ class SlakhDataset(Dataset):
             self.spectrogram_config.frames_per_second
         return frames, times
 
-    
     def _parse_midi(self, path, instrument_dict: Dict[str, str]):
         note_seqs = []
 
@@ -297,7 +295,6 @@ class SlakhDataset(Dataset):
     def _split_frame(self, row, length=2000):
         rows = []
         input_length = row['inputs'].shape[0]
-        # print('input_length', input_length, 'length', length)
 
         # chunk the audio into chunks of `length` = 2000
         # during _random_chunk, within each chunk, randomly select a segment = self.mel_length
@@ -378,7 +375,6 @@ class SlakhDataset(Dataset):
         inputs, targets, frame_times, num_insts = [], [], [], []
         if len(rows) > self.num_rows_per_batch:
             start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
-            # start_idx = 0
             rows = rows[start_idx : start_idx + self.num_rows_per_batch]
         
         predictions = []
@@ -401,7 +397,6 @@ class SlakhDataset(Dataset):
             t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
             t = np.array([self.token_to_idx(k) for k in t])
             t = self._remove_redundant_tokens(t)
-            # print(j, [self.get_token_name(token) for token in t])
             row["targets"] = t
             
             row = self._pad_length(row)
