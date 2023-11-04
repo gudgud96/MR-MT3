@@ -5,7 +5,7 @@ train:
   event_length: ${event_length}
   midi_folder: MIDI
   inst_filename: inst_names.json
-  num_rows_per_batch: 8
+  num_rows_per_batch: ${num_rows_per_batch}
 val:
   _target_: dataset.dataset_commu.ComMUDataset # choosing which data class to use
   root_dir: "/data/datasets/ComMU/dataset_processed/commu_audio_v2/val/"
@@ -13,7 +13,7 @@ val:
   event_length: ${event_length}
   midi_folder: MIDI
   inst_filename: inst_names.json
-  num_rows_per_batch: 8 
+  num_rows_per_batch: ${num_rows_per_batch}
 test:
   root_dir: "/data/datasets/ComMU/dataset_processed/commu_audio_v2/test/"
 collate_fn: dataset.dataset_commu.collate_fn

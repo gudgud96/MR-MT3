@@ -6,7 +6,7 @@ train:
   midi_folder: MIDI
   inst_filename: inst_names.json
   audio_filename: mix_16k.wav
-  num_rows_per_batch: 8
+  num_rows_per_batch: ${num_rows_per_batch}
 val:
   _target_: dataset.dataset_2_random.SlakhDataset # choosing which data class to use
   root_dir: "/data2/kinwai/slakh2100_flac_redux/validation/"
@@ -15,7 +15,7 @@ val:
   midi_folder: MIDI
   inst_filename: inst_names.json
   audio_filename: mix_16k.wav   
-  num_rows_per_batch: 8 
+  num_rows_per_batch: ${num_rows_per_batch}
 test:
   root_dir: "/data/slakh2100_flac_redux/validation"
 collate_fn: dataset.dataset_2_random.collate_fn

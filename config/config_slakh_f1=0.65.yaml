@@ -8,6 +8,7 @@ path:
 
 event_length: 1024
 mel_length: 256
+num_rows_per_batch: 12
 pretrained: pretrained/mt3.pth
 
 optim:
