@@ -46,6 +46,12 @@ trainer:
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
 
+eval:
+  is_sanity_check: False
+  eval_dataset:
+  exp_tag_name: 
+  audio_dir:
+
 defaults:
   - model: MT3Net
   - dataset: Slakh

@@ -4,15 +4,13 @@ Multi-track transcription evaluation script for Slakh dataset.
 import mir_eval
 import glob
 import pretty_midi
-import os
 import numpy as np
 import librosa
-import copy
 import note_seq
-from contrib import note_sequences, event_codec, vocabularies
 import collections
 import concurrent.futures
 import traceback
+from tqdm import tqdm
 
 
 def get_granular_program(program_number, is_drum, granularity_type):
@@ -273,86 +271,88 @@ def loop_transcription_eval(ref_mid, est_mid):
     return np.mean(np.max(score_matrix, axis=-1)), len(ref_mid.instruments), len(est_mid.instruments)
     
 
-from tqdm import tqdm
-
-# Slakh
-# exp_tag_name = "slakh_recon_randomorder"
-# exp_tag_name = "slakh_recon_randomorder_pix2seq"
-# exp_tag_name = "slakh_recon_norm_v2_0.5964"
-exp_tag_name = "slakh_baseline"
-# exp_tag_name = "slakh_recon_xl2_context=2048"
-# exp_tag_name = "slakh_recon_xl2_inst_context=2048"
-# exp_tag_name = "slakh_recon_xl2_inst"
-# exp_tag_name = "slakh_recon_xl2_context=512"
-
-dir = sorted(glob.glob(f"{exp_tag_name}/*/mix.mid"))
-dir2 = [k.replace(f"{exp_tag_name}/", "/data/slakh2100_flac_redux/test/").replace("/mix.mid", "/all_src_v2.mid") for k in dir]
-fnames = zip(dir2, dir)
-
-
-def func(item):
-    fname1, fname2 = item
-
-    results = {}
-    for granularity in ["flat", "full", "midi_class"]:
-        # print("\ngranularity:", granularity)
-        dic = mt3_program_aware_note_scores(
-            fname1, fname2, granularity
-        )
-        results.update(dic)
+def evaluate_main(
+    dataset_name,   # "Slakh" or "ComMU"
+    test_midi_dir,
+    enable_instrument_eval=False
+):
+    if dataset_name == "Slakh":
+        dir = sorted(glob.glob(f"{test_midi_dir}/*/mix.mid"))
+        dir2 = [k.replace(test_midi_dir, "/data/slakh2100_flac_redux/test/").replace("/mix.mid", "/all_src_v2.mid") for k in dir]
+        fnames = zip(dir2, dir)
     
-    return results
+    elif dataset_name == "ComMU":
+        dir = sorted(glob.glob(f"{test_midi_dir}/*.mid"))
+        dir2 = [k.replace(test_midi_dir, "/data/datasets/ComMU/dataset_processed/commu_midi_v2/test/").replace("_16k.mid", ".mid") for k in dir]
+        fnames = zip(dir2, dir)
+
+    else:
+        raise ValueError("dataset_name must be either Slakh or ComMU")
 
 
-pbar = tqdm(total=len(dir))
-scores = collections.defaultdict(list)
-with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-    # Start the load operations and mark each future with its URL
-    future_to_fname = {executor.submit(func, fname): fname for fname in fnames}
-    for future in concurrent.futures.as_completed(future_to_fname):
-        try:
-            fname = future_to_fname[future]
-            dic = future.result()
-            for item in dic:
-                scores[item].append(dic[item])
-            pbar.update()
-        except Exception as e:
-            print(str(e))
-            traceback.print_exc()
-            
+    def func(item):
+        fname1, fname2 = item
 
-mean_scores = {k: np.mean(v) for k, v in scores.items() if k != "F1 by program"}
-for key in sorted(list(mean_scores)):
-    print("{}: {:.4}".format(key, mean_scores[key]))
+        results = {}
+        for granularity in ["flat", "full", "midi_class"]:
+            # print("\ngranularity:", granularity)
+            dic = mt3_program_aware_note_scores(
+                fname1, fname2, granularity
+            )
+            results.update(dic)
+        
+        return results
 
-print("====")
-program_f1_dict = {}
-for item in scores["F1 by program"]:
-    for key in item:
-        if key not in program_f1_dict:
-            program_f1_dict[key] = []
-        program_f1_dict[key].append(item[key])
 
-d = {
-    -1: "Drums",
-    0: "Piano",
-    1: "Chromatic Percussion",
-    2: "Organ",
-    3: "Guitar",
-    4: "Bass",
-    5: "Strings",
-    6: "Ensemble",
-    7: "Brass",
-    8: "Reed",
-    9: "Pipe",
-    10: "Synth Lead",
-    11: "Synth Pad",
-    12: "Synth Effects",
-}
-print(program_f1_dict)
-program_f1_dict = {k: np.mean(np.array(v)) for k, v in program_f1_dict.items()}
-for key in d:
-    if key == -1:
-        print("{}: {:.4}".format(d[key], program_f1_dict[key]))
-    elif key * 8 in program_f1_dict:
-        print("{}: {:.4}".format(d[key], program_f1_dict[key * 8]))
+    pbar = tqdm(total=len(dir))
+    scores = collections.defaultdict(list)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        # Start the load operations and mark each future with its URL
+        future_to_fname = {executor.submit(func, fname): fname for fname in fnames}
+        for future in concurrent.futures.as_completed(future_to_fname):
+            try:
+                fname = future_to_fname[future]
+                dic = future.result()
+                for item in dic:
+                    scores[item].append(dic[item])
+                pbar.update()
+            except Exception as e:
+                print(str(e))
+                traceback.print_exc()
+                
+
+    mean_scores = {k: np.mean(v) for k, v in scores.items() if k != "F1 by program"}
+    for key in sorted(list(mean_scores)):
+        print("{}: {:.4}".format(key, mean_scores[key]))
+
+    if enable_instrument_eval:
+        print("====")
+        program_f1_dict = {}
+        for item in scores["F1 by program"]:
+            for key in item:
+                if key not in program_f1_dict:
+                    program_f1_dict[key] = []
+                program_f1_dict[key].append(item[key])
+
+        d = {
+            -1: "Drums",
+            0: "Piano",
+            1: "Chromatic Percussion",
+            2: "Organ",
+            3: "Guitar",
+            4: "Bass",
+            5: "Strings",
+            6: "Ensemble",
+            7: "Brass",
+            8: "Reed",
+            9: "Pipe",
+            10: "Synth Lead",
+            11: "Synth Pad",
+            12: "Synth Effects",
+        }
+        program_f1_dict = {k: np.mean(np.array(v)) for k, v in program_f1_dict.items()}
+        for key in d:
+            if key == -1:
+                print("{}: {:.4}".format(d[key], program_f1_dict[key]))
+            elif key * 8 in program_f1_dict:
+                print("{}: {:.4}".format(d[key], program_f1_dict[key * 8]))

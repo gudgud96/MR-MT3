@@ -9,13 +9,12 @@ path:
 event_length: 1024
 mel_length: 256
 num_rows_per_batch: 8
-pretrained: pretrained/mt3.pth
 
 optim:
   lr: 2e-4
   warmup_steps: 64500
   num_epochs: ${num_epochs}
-  num_steps_per_epoch: 1289   # TODO: this is not good practice. Ideally we can get this from dataloader.
+  num_steps_per_epoch: 1322   # TODO: this is not good practice. Ideally we can get this from dataloader.
   min_lr: 1e-4
 
 grad_accum: 1
@@ -45,6 +44,12 @@ trainer:
   log_every_n_steps: 100
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
+
+eval:
+  is_sanity_check: False
+  eval_dataset:
+  exp_tag_name: 
+  audio_dir:
 
 defaults:
   - model: MT3Net
