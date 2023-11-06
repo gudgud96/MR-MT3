@@ -25,7 +25,6 @@ def main(cfg):
     model.load_state_dict(torch.load(cfg.path))
     model.eval()
 
-    # # ====== version 2 ====== #
     dir = sorted(glob.glob(cfg.eval.audio_dir))
     if cfg.eval.is_sanity_check:
         dir = dir[:10]

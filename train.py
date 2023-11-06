@@ -63,14 +63,8 @@ def main(cfg):
     )
 
     # save the model in .pt format
-    # current_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    # ckpt_path = os.path.join(current_dir, f"{cfg.model_type}_{cfg.dataset_type}", "version_0/checkpoints/last.ckpt")
-    ckpt_path = cfg.path
-    # model = MT3Net.load_from_checkpoint(
-    #     ckpt_path,
-    #     config=cfg.model,
-    #     optim_cfg=cfg.optim
-    # )
+    current_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    ckpt_path = os.path.join(current_dir, f"{cfg.model_type}_{cfg.dataset_type}", "version_0/checkpoints/last.ckpt")
     model.eval()
     dic = {}
     for key in model.state_dict():
