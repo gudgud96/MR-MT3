@@ -274,16 +274,17 @@ def loop_transcription_eval(ref_mid, est_mid):
 def evaluate_main(
     dataset_name,   # "Slakh" or "ComMU"
     test_midi_dir,
+    ground_truth_midi_dir,
     enable_instrument_eval=False
 ):
     if dataset_name == "Slakh":
         dir = sorted(glob.glob(f"{test_midi_dir}/*/mix.mid"))
-        dir2 = [k.replace(test_midi_dir, "/data/slakh2100_flac_redux/test/").replace("/mix.mid", "/all_src_v2.mid") for k in dir]
+        dir2 = [k.replace(test_midi_dir, ground_truth_midi_dir).replace("/mix.mid", "/all_src_v2.mid") for k in dir]
         fnames = zip(dir2, dir)
     
     elif dataset_name == "ComMU":
         dir = sorted(glob.glob(f"{test_midi_dir}/*.mid"))
-        dir2 = [k.replace(test_midi_dir, "/data/datasets/ComMU/dataset_processed/commu_midi_v2/test/").replace("_16k.mid", ".mid") for k in dir]
+        dir2 = [k.replace(test_midi_dir, ground_truth_midi_dir).replace("_16k.mid", ".mid") for k in dir]
         fnames = zip(dir2, dir)
 
     else:

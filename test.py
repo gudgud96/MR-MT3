@@ -70,6 +70,7 @@ def main(cfg):
     evaluate_main(
         dataset_name=cfg.eval.eval_dataset,
         test_midi_dir=os.path.join(current_dir, cfg.eval.exp_tag_name),
+        ground_truth_midi_dir=cfg.dataset.test.root_dir,
     )
 
 
