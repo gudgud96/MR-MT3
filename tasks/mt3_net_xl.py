@@ -47,7 +47,7 @@ class MT3NetXL(pl.LightningModule):
                 optimizer=optimizer, 
                 num_warmup_steps=warmup_step, 
                 num_training_steps=1289*self.optim_cfg.num_epochs,
-                min_lr=5e-5
+                min_lr=self.optim_cfg.min_lr
             ),
             'interval': 'step',
             'frequency': 1

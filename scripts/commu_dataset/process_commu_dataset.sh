@@ -1,0 +1,2 @@
+python3 create_commu_test_split.python3
+python3 render_commu.py

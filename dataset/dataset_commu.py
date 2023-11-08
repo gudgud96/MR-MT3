@@ -4,21 +4,21 @@ from torch.utils.data import Dataset, DataLoader
 import tensorflow as tf
 tf.config.set_visible_devices([], 'GPU')
 
-from itertools import cycle
-import json
 import random
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Sequence, Tuple
 import numpy as np
 import librosa
 import note_seq
 from glob import glob
 from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding, metrics_utils
-from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
+from contrib.preprocessor import add_track_to_notesequence, PitchBendError
 import soundfile as sf
 import os
 
 MIN_LOG_MEL = -12
 MAX_LOG_MEL = 5
+
+# TODO: duplicated code...ideally, we should have a base class for all token-based transcription datasets
 
 class ComMUDataset(Dataset):
 
@@ -33,8 +33,8 @@ class ComMUDataset(Dataset):
         onsets_only=False, 
         midi_folder='MIDI', 
         inst_filename='inst_names.json',
-        audio_filename='',
-        shuffle=True
+        shuffle=True,
+        num_rows_per_batch=8
     ) -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
@@ -51,6 +51,7 @@ class ComMUDataset(Dataset):
         self.ignore_pitch_bends = ignore_pitch_bends
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
+        self.num_rows_per_batch = num_rows_per_batch
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
@@ -84,7 +85,6 @@ class ComMUDataset(Dataset):
             self.spectrogram_config.frames_per_second
         return frames, times
 
-    
     def _parse_midi(self, path):
         return note_seq.midi_file_to_note_sequence(path)
 
@@ -280,6 +280,9 @@ class ComMUDataset(Dataset):
     def _split_frame(self, row, length=2000):
         rows = []
         input_length = row['inputs'].shape[0]
+
+        # chunk the audio into chunks of `length` = 2000
+        # during _random_chunk, within each chunk, randomly select a segment = self.mel_length
         for split in range(0, input_length, length):
             if split + length >= input_length:
                 continue
@@ -352,14 +355,11 @@ class ComMUDataset(Dataset):
         # this does not guarantee the chunks in `rows` to be contiguous.
         # if we need to ensure that the chunks in `rows` to be contiguous, use:
         rows = self._split_frame(row, length=self.mel_length)
-        # rows = self._split_frame(row)
         
         inputs, targets, frame_times, num_insts = [], [], [], []
-        num_rows = 8
-        if len(rows) > num_rows:
-            start_idx = random.randint(0, len(rows) - num_rows)
-            # start_idx = 0
-            rows = rows[start_idx : start_idx + num_rows]
+        if len(rows) > self.num_rows_per_batch:
+            start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
+            rows = rows[start_idx : start_idx + self.num_rows_per_batch]
         
         predictions = []
         # wavs = []
@@ -381,7 +381,6 @@ class ComMUDataset(Dataset):
             t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
             t = np.array([self.token_to_idx(k) for k in t])
             t = self._remove_redundant_tokens(t)
-            # print(j, [self.get_token_name(token) for token in t])
             row["targets"] = t
             
             row = self._pad_length(row)
@@ -504,16 +503,6 @@ class ComMUDataset(Dataset):
 def collate_fn(lst):
     inputs = torch.cat([k[0] for k in lst])
     targets = torch.cat([k[1] for k in lst])
-    # num_insts = torch.cat([k[2] for k in lst])
-
-    # add random shuffling here
-    # indices = np.arange(inputs.shape[0])
-    # np.random.shuffle(indices)
-    # indices = torch.from_numpy(indices)
-    # inputs = inputs[indices]
-    # targets = targets[indices]
-    # num_insts = num_insts[indices]
-
     return inputs, targets
 
 if __name__ == '__main__':
