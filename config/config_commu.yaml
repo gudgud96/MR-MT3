@@ -50,6 +50,7 @@ eval:
   eval_dataset:
   exp_tag_name: 
   audio_dir:
+  midi_dir:
 
 defaults:
   - model: MT3Net

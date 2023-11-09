@@ -17,5 +17,5 @@ val:
   audio_filename: mix_16k.wav   
   num_rows_per_batch: ${num_rows_per_batch}
 test:
-  root_dir: "/data/slakh2100_flac_redux/validation"
+  root_dir: "/data/slakh2100_flac_redux/test"
 collate_fn: dataset.dataset_2_random.collate_fn

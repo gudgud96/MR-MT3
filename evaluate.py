@@ -286,6 +286,11 @@ def evaluate_main(
         dir = sorted(glob.glob(f"{test_midi_dir}/*.mid"))
         dir2 = [k.replace(test_midi_dir, ground_truth_midi_dir).replace("_16k.mid", ".mid") for k in dir]
         fnames = zip(dir2, dir)
+    
+    elif dataset_name == "NSynth":
+        dir = sorted(glob.glob(f"{test_midi_dir}/*.mid"))
+        dir2 = [k.replace(test_midi_dir, ground_truth_midi_dir).replace("_16k.mid", ".mid") for k in dir]
+        fnames = zip(dir2, dir)
 
     else:
         raise ValueError("dataset_name must be either Slakh or ComMU")
@@ -357,3 +362,11 @@ def evaluate_main(
                 print("{}: {:.4}".format(d[key], program_f1_dict[key]))
             elif key * 8 in program_f1_dict:
                 print("{}: {:.4}".format(d[key], program_f1_dict[key * 8]))
+
+
+if __name__ == "__main__":
+    evaluate_main(
+        "Slakh",
+        test_midi_dir="outputs/2023-11-07/22-10-36/commu_mt3_on_slakh/",
+        ground_truth_midi_dir="/data/slakh2100_flac_redux/test/",
+    )
