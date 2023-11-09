@@ -213,20 +213,31 @@ def decode_events(
       invalid_events: number of events that could not be decoded.
       dropped_events: number of events dropped due to max_time restriction.
     """
+    total_events = len(tokens)        # equivalent to total number of tokens
+    exc_dict = {}
     invalid_events = 0
     dropped_events = 0
+    adjacent_program_events = 0
     cur_steps = 0
     cur_time = start_time
     token_idx = 0
     # print("decode event")
+    prev_idx, prev_event = None, None
     for token_idx, token in enumerate(tokens):
         try:
             event = codec.decode_event_index(token)
-            # print('token', token, 'event', event)
         except ValueError:
-            # print('invalid token!', token)
             invalid_events += 1
             continue
+        
+        if event.type == 'program':
+            if prev_event == None:
+                prev_idx, prev_event = token_idx, event
+            else:
+                if prev_idx == token_idx - 1:
+                    adjacent_program_events += 1
+                prev_idx, prev_event = token_idx, event
+            
         if event.type == 'shift':
             cur_steps += event.value
             cur_time = start_time + cur_steps / codec.steps_per_second
@@ -237,12 +248,58 @@ def decode_events(
             cur_steps = 0
             try:
                 decode_event_fn(state, cur_time, event, codec)
-            except ValueError:
-                # print('invalid token 2!', token)
+            except ValueError as e:
                 invalid_events += 1
                 logging.info(
                     'Got invalid event when decoding event %s at time %f. '
                     'Invalid event counter now at %d.',
-                    event, cur_time, invalid_events, exc_info=True)
+                    event, cur_time, invalid_events)
+                
+                # classify invalid events based on the exception message
+                exc_str = str(e)
+                print(exc_str)
+
+                if "event time < current time" in exc_str:
+                    if "event time < current time" not in exc_dict:
+                        exc_dict["event time < current time"] = 1
+                    else:
+                        exc_dict["event time < current time"] += 1
+                elif "inactive pitch/program in tie section" in exc_str:
+                    if "inactive pitch/program in tie section" not in exc_dict:
+                        exc_dict["inactive pitch/program in tie section"] = 1
+                    else:
+                        exc_dict["inactive pitch/program in tie section"] += 1
+                elif "pitch/program is already tied" in exc_str:
+                    if "pitch/program is already tied" not in exc_dict:
+                        exc_dict["pitch/program is already tied"] = 1
+                    else:
+                        exc_dict["pitch/program is already tied"] += 1
+                elif "note-off for inactive pitch/program" in exc_str:
+                    if "note-off for inactive pitch/program" not in exc_dict:
+                        exc_dict["note-off for inactive pitch/program"] = 1
+                    else:
+                        exc_dict["note-off for inactive pitch/program"] += 1
+                elif "velocity cannot be zero for drum event" in exc_str:
+                    if "velocity cannot be zero for drum event" not in exc_dict:
+                        exc_dict["velocity cannot be zero for drum event"] = 1
+                    else:
+                        exc_dict["velocity cannot be zero for drum event"] += 1
+                elif "tie section end event when not in tie section" in exc_str:
+                    if "tie section end event when not in tie section" not in exc_dict:
+                        exc_dict["tie section end event when not in tie section"] = 1
+                    else:
+                        exc_dict["tie section end event when not in tie section"] += 1
+                elif "unexpected event type" in exc_str:
+                    if "unexpected event type" not in exc_dict:
+                        exc_dict["unexpected event type"] = 1
+                    else:
+                        exc_dict["unexpected event type"] += 1
+                else:
+                    print("unknown exception: ", exc_str)
+                    if "unknown" not in exc_dict:
+                        exc_dict["unknown"] = 1
+                    else:
+                        exc_dict["unknown"] += 1
+
                 continue
-    return invalid_events, dropped_events
+    return total_events, invalid_events, dropped_events, adjacent_program_events, exc_dict

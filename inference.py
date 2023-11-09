@@ -195,13 +195,33 @@ class InferenceHandler:
                 result = self._postprocess_batch(result)
                 results.append(result)
             
-            event = self._to_event(results, frame_times)
+            # just for printing
+            # results_for_print = [k for res in results for k in res]
+            # for res in results_for_print:
+            #     print([self.get_token_name(k) for k in res])
+            #     print()
+            # print()
+
+            res = self._to_event(results, frame_times)
+            event = res["est_ns"]
+
+            invalid_events_perc = res['est_invalid_events'] / res['est_total_events']
+            dropped_events_perc = res['est_dropped_events'] / res['est_total_events']
+            adjacent_program_events = res['est_adjacent_program_events'] / res['est_total_events']
+            ret_dict = {
+                "invalid_events_perc": invalid_events_perc,
+                "dropped_events_perc": dropped_events_perc,
+                "adjacent_program_events_perc": adjacent_program_events,
+                "est_exc_dict": res['est_exc_dict'],
+            }
+
             if outpath is None:
                 filename = audio_path.split('/')[-1].split('.')[0]
                 outpath = f'./out/{filename}.mid'
             os.makedirs('/'.join(outpath.split('/')[:-1]), exist_ok=True)
             print("saving", outpath)
             note_seq.sequence_proto_to_midi_file(event, outpath)
+            return ret_dict
         
         except Exception as e:
             traceback.print_exc()
@@ -234,4 +254,24 @@ class InferenceHandler:
         encoding_spec = note_sequences.NoteEncodingWithTiesSpec
         result = metrics_utils.event_predictions_to_ns(
             predictions, codec=self.codec, encoding_spec=encoding_spec)
-        return result['est_ns']
+        return result
+    
+    def get_token_name(self, token_idx):
+        token_idx = int(token_idx)
+        if token_idx >= 1001 and token_idx <= 1128:
+            token = f"pitch_{token_idx - 1001}"
+        elif token_idx >= 1129 and token_idx <= 1130:
+            token = f"vel_{token_idx - 1129}"
+        elif token_idx >= 1131 and token_idx <= 1131:
+            token = "tie"
+        elif token_idx >= 1132 and token_idx <= 1259:
+            token = f"prog_{token_idx - 1132}"
+        elif token_idx >= 1260 and token_idx <= 1387:
+            token = f"drum_{token_idx - 1260}"
+        elif token_idx >= 0 and token_idx < 1000:
+            token = f"shift_{token_idx}"
+        else:
+            # token = f"invalid_{token_idx}"
+            token = "<pad>"
+        
+        return token

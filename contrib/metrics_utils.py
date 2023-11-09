@@ -90,8 +90,11 @@ def decode_and_combine_predictions(
         predictions, key=lambda pred: pred['start_time'])
 
     state = init_state_fn()
+    total_events_sum = 0
+    total_adjacent_program_events = 0
     total_invalid_events = 0
     total_dropped_events = 0
+    all_exc_dict = {}
 
     for pred_idx, pred in enumerate(sorted_predictions):
         begin_segment_fn(state)
@@ -105,13 +108,21 @@ def decode_and_combine_predictions(
         if pred_idx < len(sorted_predictions) - 1:
             max_decode_time = sorted_predictions[pred_idx + 1]['start_time']
 
-        invalid_events, dropped_events = decode_tokens_fn(
+        total_events, invalid_events, dropped_events, adjacent_program_events, exc_dict = decode_tokens_fn(
             state, pred['est_tokens'], pred['start_time'], max_decode_time)
 
+        total_events_sum += total_events
         total_invalid_events += invalid_events
         total_dropped_events += dropped_events
+        total_adjacent_program_events += adjacent_program_events
 
-    return flush_state_fn(state), total_invalid_events, total_dropped_events
+        for exc in exc_dict:
+            if exc in all_exc_dict:
+                all_exc_dict[exc] += exc_dict[exc]
+            else:
+                all_exc_dict[exc] = exc_dict[exc]
+
+    return flush_state_fn(state), total_events_sum, total_invalid_events, total_dropped_events, total_adjacent_program_events, all_exc_dict
 
 
 def event_predictions_to_ns(
@@ -119,7 +130,7 @@ def event_predictions_to_ns(
     encoding_spec: note_sequences.NoteEncodingSpecType
 ) -> Mapping[str, Any]:
     """Convert a sequence of predictions to a combined NoteSequence."""
-    ns, total_invalid_events, total_dropped_events = decode_and_combine_predictions(
+    ns, total_events_sum, total_invalid_events, total_dropped_events, total_adjacent_program_events, all_exc_dict = decode_and_combine_predictions(
         predictions=predictions,
         init_state_fn=encoding_spec.init_decoding_state_fn,
         begin_segment_fn=encoding_spec.begin_decoding_segment_fn,
@@ -143,6 +154,9 @@ def event_predictions_to_ns(
         'est_ns': ns,
         'est_invalid_events': total_invalid_events,
         'est_dropped_events': total_dropped_events,
+        'est_total_events': total_events_sum,
+        'est_adjacent_program_events': total_adjacent_program_events,
+        'est_exc_dict': all_exc_dict
     }
 
 
