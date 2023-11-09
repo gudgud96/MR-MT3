@@ -6,25 +6,25 @@ dataset_type: ${hydra:runtime.choices.dataset}
 seed: 365
 path:
 
-event_length: 1024
+event_length: 256
 mel_length: 256
 num_rows_per_batch: 8
 
 optim:
-  lr: 6e-5
-  warmup_steps: 5160
+  lr: 2e-4
+  warmup_steps: 64500
   num_epochs: ${num_epochs}
-  num_steps_per_epoch: 1289   # TODO: this is not good practice. Ideally we can get this from dataloader.
-  min_lr: 5e-5
+  num_steps_per_epoch: 1322   # TODO: this is not good practice. Ideally we can get this from dataloader.
+  min_lr: 1e-4
 
 grad_accum: 1
 
 dataloader:
   train:
-    batch_size: 1
+    batch_size: 4
     num_workers: 12
   val:
-    batch_size: 1
+    batch_size: 4
     num_workers: 12  
 
 modelcheckpoint:
@@ -53,4 +53,4 @@ eval:
 
 defaults:
   - model: MT3Net
-  - dataset: Slakh
+  - dataset: ComMU

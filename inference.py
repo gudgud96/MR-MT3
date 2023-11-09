@@ -6,8 +6,8 @@ from typing import List
 import numpy as np
 from tqdm import tqdm
 from models.t5 import T5ForConditionalGeneration, T5Config
-# from models.t5_xl import T5WithXLDecoder, T5Config
-from models.t5_xl_instrument import T5WithXLDecoder, T5Config
+from models.t5_xl import T5WithXLDecoder, T5Config
+# from models.t5_xl_instrument import T5WithXLDecoder, T5Config
 import torch.nn as nn
 import torch
 from contrib import spectrograms, vocabularies, note_sequences, metrics_utils
@@ -21,36 +21,50 @@ MAX_LOG_MEL = 5
 
 class InferenceHandler:
 
-    def __init__(self, root_path, weight_path, device=torch.device('cuda')) -> None:
-        # config_path = f'{root_path}/config.json'
-        config_path = "config/mt3_config.json"
-        with open(config_path) as f:
-            config_dict = json.load(f)
-        config = T5Config.from_dict(config_dict)
+    def __init__(
+        self, 
+        model=None, 
+        weight_path=None, 
+        device=torch.device('cuda'),
+        mel_norm=True,
+        contiguous_inference=False
+    ) -> None:
+        if model is None:
+            # config_path = f'{root_path}/config.json'
+            config_path = "config/mt3_config.json"
+            with open(config_path) as f:
+                config_dict = json.load(f)
+            config = T5Config.from_dict(config_dict)
+
+            if "xl" in weight_path:
+                model: nn.Module = T5WithXLDecoder(config)
+                self.contiguous_inference = True
+            else:
+                model: nn.Module = T5ForConditionalGeneration(config)
+                self.contiguous_inference = False
+            
+            model.load_state_dict(torch.load(
+                weight_path, map_location='cpu'), strict=True)
+            model.eval()
         
-        if "xl" in weight_path:
-            model: nn.Module = T5WithXLDecoder(config)
-            self.contiguous_inference = True
-        else:
-            model: nn.Module = T5ForConditionalGeneration(config)
-            self.contiguous_inference = False
-        
-        model.load_state_dict(torch.load(
-            weight_path, map_location='cpu'), strict=True)
-        model.eval()
+        self.model = model
+
+        # NOTE: this is only used for XL models, but might change after we train new versions.
+        self.contiguous_inference = contiguous_inference
+
         self.SAMPLE_RATE = 16000
         self.spectrogram_config = spectrograms.SpectrogramConfig()
         self.codec = vocabularies.build_codec(vocab_config=vocabularies.VocabularyConfig(
             num_velocity_bins=1))
         self.vocab = vocabularies.vocabulary_from_codec(self.codec)
         self.device = device
-        self.model = model
         self.model.to(self.device)
 
-        if "pretrained/mt3.pth" in weight_path:
-            self.mel_norm = False
-        else:
-            self.mel_norm = True
+        self.mel_norm = mel_norm
+        # if "pretrained/mt3.pth" in weight_path:
+        #     self.mel_norm = False
+        # else:
+        #     self.mel_norm = True
 
     def _audio_to_frames(self, audio):
         """Compute spectrogram frames from audio."""
@@ -143,6 +157,7 @@ class InferenceHandler:
         valid_programs=None, 
         num_beams=1, 
         batch_size=5,
+        max_length=1024,
     ):
         """
         `contiguous_inference` is True only for XL models as context from previous chunk is needed.
@@ -171,7 +186,7 @@ class InferenceHandler:
             for idx, batch in enumerate(inputs_tensor):
                 batch = batch.to(self.device)
 
-                result = self.model.generate(inputs=batch, max_length=1024, num_beams=num_beams, do_sample=False,
+                result = self.model.generate(inputs=batch, max_length=max_length, num_beams=num_beams, do_sample=False,
                                             length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, 
                                             early_stopping=False, bad_words_ids=invalid_programs,
                                             use_cache=False,

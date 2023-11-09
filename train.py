@@ -15,6 +15,7 @@ import pytorch_lightning as pl
 import os
 
 import hydra
+from tasks.mt3_net import MT3Net
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -35,44 +36,45 @@ def main(cfg):
     checkpoint_callback = ModelCheckpoint(**cfg.modelcheckpoint)
     tqdm_callback = TQDMProgressBar(refresh_rate=1)
 
-    if cfg.mode == "train":
-        trainer = pl.Trainer(
-            logger=logger,
-            callbacks=[lr_monitor, checkpoint_callback, tqdm_callback],
-            **cfg.trainer
-        )
+    trainer = pl.Trainer(
+        logger=logger,
+        callbacks=[lr_monitor, checkpoint_callback, tqdm_callback],
+        **cfg.trainer
+    )
 
-        train_loader = DataLoader(
-            hydra.utils.instantiate(cfg.dataset.train),
-            # SlakhDataset(**cfg.data.train), 
-            **cfg.dataloader.train,
-            collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
-        )
+    train_loader = DataLoader(
+        hydra.utils.instantiate(cfg.dataset.train),
+        # SlakhDataset(**cfg.data.train), 
+        **cfg.dataloader.train,
+        collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
+    )
 
-        val_loader = DataLoader(
-            hydra.utils.instantiate(cfg.dataset.val),
-            **cfg.dataloader.val,
-            collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
-        )
+    val_loader = DataLoader(
+        hydra.utils.instantiate(cfg.dataset.val),
+        **cfg.dataloader.val,
+        collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
+    )
 
-        trainer.fit(model, train_loader, val_loader)
+    trainer.fit(
+        model, 
+        train_loader, 
+        val_loader,
+        ckpt_path=cfg.path
+    )
 
-    else:
-        # To activate this part, run:
-        # python train.py mode=test
-        model = MT3Net.load_from_checkpoint(
-            cfg.path,
-            config=cfg
-        )
-        model.eval()
-        dic = {}
-        for key in model.state_dict():
-            if "model." in key:
-                dic[key.replace("model.", "")] = model.state_dict()[key]
-            else:
-                dic[key] = model.state_dict()[key]
-        torch.save(dic, cfg.path.replace(".ckpt", ".pth"))   # TODO: need to specify save .pth
-
+    # save the model in .pt format
+    current_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    ckpt_path = os.path.join(current_dir, f"{cfg.model_type}_{cfg.dataset_type}", "version_0/checkpoints/last.ckpt")
+    model.eval()
+    dic = {}
+    for key in model.state_dict():
+        if "model." in key:
+            dic[key.replace("model.", "")] = model.state_dict()[key]
+        else:
+            dic[key] = model.state_dict()[key]
+    torch.save(dic, ckpt_path.replace(".ckpt", ".pt"))
+    print(f"Saved model in {ckpt_path.replace('.ckpt', '.pt')}.")
+        
 
 if __name__ == "__main__":   
     main()

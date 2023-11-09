@@ -4,21 +4,23 @@ from torch.utils.data import Dataset, DataLoader
 import tensorflow as tf
 tf.config.set_visible_devices([], 'GPU')
 
-import json
 import random
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Sequence, Tuple
 import numpy as np
 import librosa
 import note_seq
 from glob import glob
 from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding, metrics_utils
-from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
+from contrib.preprocessor import add_track_to_notesequence, PitchBendError
 import soundfile as sf
+import os
 
 MIN_LOG_MEL = -12
 MAX_LOG_MEL = 5
 
-class SlakhDataset(Dataset):
+# TODO: duplicated code...ideally, we should have a base class for all token-based transcription datasets
+
+class ComMUDataset(Dataset):
 
     def __init__(
         self, 
@@ -29,7 +31,6 @@ class SlakhDataset(Dataset):
         include_ties=True, 
         ignore_pitch_bends=True, 
         onsets_only=False, 
-        audio_filename='mix.flac', 
         midi_folder='MIDI', 
         inst_filename='inst_names.json',
         shuffle=True,
@@ -40,7 +41,6 @@ class SlakhDataset(Dataset):
         self.codec = vocabularies.build_codec(vocab_config=vocabularies.VocabularyConfig(
             num_velocity_bins=1))
         self.vocab = vocabularies.vocabulary_from_codec(self.codec)
-        self.audio_filename = audio_filename
         self.midi_folder = midi_folder
         self.inst_filename = inst_filename
         self.mel_length = mel_length
@@ -55,15 +55,12 @@ class SlakhDataset(Dataset):
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
-        audio_files = sorted(glob(f'{root_dir}/**/{self.audio_filename}'))
-        print("root_dir", root_dir, len(audio_files), self.audio_filename)
+        audio_files = sorted(glob(f'{root_dir}/*.wav'))
+        print("root_dir", root_dir, len(audio_files))
         for a_f in audio_files:
-            inst_path = a_f.replace(self.audio_filename, self.inst_filename)
-            midi_path = a_f.replace(self.audio_filename, self.midi_folder)
-            with open(inst_path) as f:
-                inst_names = json.load(f)
-            df.append({'inst_names': inst_names, 'audio_path': a_f, 'midi_path': midi_path})
-        assert len(df) > 0
+            midi_path = a_f.replace("commu_audio_v2", "commu_midi_v2").replace("_16k.wav", ".mid")
+            assert os.path.exists(midi_path)
+            df.append({'audio_path': a_f, 'midi_path': midi_path})
         print('total file:', len(df))
         if shuffle:
             random.shuffle(df)
@@ -88,33 +85,23 @@ class SlakhDataset(Dataset):
             self.spectrogram_config.frames_per_second
         return frames, times
 
-    def _parse_midi(self, path, instrument_dict: Dict[str, str]):
-        note_seqs = []
+    def _parse_midi(self, path):
+        return note_seq.midi_file_to_note_sequence(path)
 
-        for filename in instrument_dict.keys():
-            # this can be pretty_midi.PrettyMIDI() obj / string path to midi
-            midi_path = f'{path}/{filename}.mid'
-            note_seqs.append(note_seq.midi_file_to_note_sequence(midi_path))
-        return note_seqs, instrument_dict.values()
-
-    def _tokenize(self, tracks: List[note_seq.NoteSequence], samples: np.ndarray, inst_names: List[str], example_id: Optional[str] = None):
+    def _tokenize(self, track: note_seq.NoteSequence, samples: np.ndarray):
 
         frames, frame_times = self._audio_to_frames(samples)
 
         # Add all the notes from the tracks to a single NoteSequence.
         ns = note_seq.NoteSequence(ticks_per_quarter=220)
-        # tracks = [note_seq.NoteSequence.FromString(seq) for seq in sequences]
-        assert len(tracks) == len(inst_names)
 
-        for track, inst_name in zip(tracks, inst_names):
-            # Instrument name should be Slakh class.
-            program, is_drum = slakh_class_to_program_and_is_drum(inst_name)
-            try:
-                add_track_to_notesequence(ns, track, program=program, is_drum=is_drum,
-                                          ignore_pitch_bends=self.ignore_pitch_bends)
-            except PitchBendError:
-                # TODO(iansimon): is there a way to count these?
-                return
+        program, is_drum = track.notes[0].program, track.notes[0].is_drum
+        try:
+            add_track_to_notesequence(ns, track, program=program, is_drum=is_drum,
+                                        ignore_pitch_bends=self.ignore_pitch_bends)
+        except PitchBendError:
+            # TODO(iansimon): is there a way to count these?
+            return
 
         note_sequences.assign_instruments(ns)
         note_sequences.validate_note_sequence(ns)
@@ -122,9 +109,6 @@ class SlakhDataset(Dataset):
             # Trim overlapping notes in training (as our event vocabulary cannot
             # represent them), but preserve original NoteSequence for eval.
             ns = note_sequences.trim_overlapping_notes(ns)
-
-        if example_id is not None:
-            ns.id = example_id
 
         if self.onsets_only:
             times, values = note_sequences.note_sequence_to_onsets(ns)
@@ -283,6 +267,7 @@ class SlakhDataset(Dataset):
         if inputs.shape[0] < self.mel_length:
             pad = torch.zeros(self.mel_length - inputs.shape[0], inputs.shape[1], dtype=inputs.dtype, device=inputs.device)
             inputs = torch.cat([inputs, pad], dim=0)
+        # print('targets shape', targets.shape[0])
         if targets.shape[0] < self.event_length:
             eos = torch.ones(1, dtype=targets.dtype, device=targets.device)
             if self.event_length - targets.shape[0] - 1 > 0:
@@ -360,17 +345,16 @@ class SlakhDataset(Dataset):
     
     def __getitem__(self, idx):
         row = self.df[idx]
-        ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
+        ns = self._parse_midi(row['midi_path'])
         audio, sr = librosa.load(row['audio_path'], sr=None)
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
-        row = self._tokenize(ns, audio, inst_names)
+        row = self._tokenize(ns, audio)
 
         # NOTE: by default, this is self._split_frame(row, length=2000)
         # this does not guarantee the chunks in `rows` to be contiguous.
         # if we need to ensure that the chunks in `rows` to be contiguous, use:
-        # rows = self._split_frame(row, length=self.mel_length)
-        rows = self._split_frame(row)
+        rows = self._split_frame(row, length=self.mel_length)
         
         inputs, targets, frame_times, num_insts = [], [], [], []
         if len(rows) > self.num_rows_per_batch:
@@ -412,14 +396,13 @@ class SlakhDataset(Dataset):
             # result -= self.vocab.num_special_tokens()
             # result = torch.where(after_eos.bool(), -1, result)
 
-            # print("start_times", row["input_times"][0])
+            # # print("start_times", row["input_times"][0])
             # if fake_start is None:
             #     fake_start = row["input_times"][0]
             # # predictions = []
             # predictions.append({
             #     'est_tokens': result.cpu().detach().numpy(),    # has to be numpy here, or else problematic
-            #     # 'start_time': row["input_times"][0] - fake_start,
-            #     'start_time': j * 2.048,
+            #     'start_time': row["input_times"][0] - fake_start,
             #     # 'start_time': 0,
             #     'raw_inputs': []
             # })
@@ -520,21 +503,11 @@ class SlakhDataset(Dataset):
 def collate_fn(lst):
     inputs = torch.cat([k[0] for k in lst])
     targets = torch.cat([k[1] for k in lst])
-    # num_insts = torch.cat([k[2] for k in lst])
-
-    # add random shuffling here
-    # indices = np.arange(inputs.shape[0])
-    # np.random.shuffle(indices)
-    # indices = torch.from_numpy(indices)
-    # inputs = inputs[indices]
-    # targets = targets[indices]
-    # num_insts = num_insts[indices]
-
     return inputs, targets
 
 if __name__ == '__main__':
-    dataset = SlakhDataset(
-        root_dir='/data/slakh2100_flac_redux/test/',
+    dataset = ComMUDataset(
+        root_dir='/data/datasets/ComMU/dataset_processed/commu_audio_v2/train/',
         shuffle=False,
         is_train=False,
         include_ties=True,
@@ -545,9 +518,9 @@ if __name__ == '__main__':
     print("tie", dataset.codec.event_type_range("tie"))
     print("program", dataset.codec.event_type_range("program"))
     print("drum", dataset.codec.event_type_range("drum"))
-    dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
+    dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=True)
     for idx, item in enumerate(dl):
         inputs, targets = item
-        print(idx, inputs.shape, targets[0])
+        print(idx, inputs.shape, targets[0].shape)
         break
     
