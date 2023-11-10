@@ -14,6 +14,7 @@ optim:
   lr: 2e-4
   warmup_steps: 64500
   num_epochs: ${num_epochs}
+  num_steps_per_epoch: # keep it empty since it will be parsed inside train.py  
   min_lr: 1e-4
 
 grad_accum: 1
@@ -44,7 +45,12 @@ trainer:
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
 
+eval:
+  is_sanity_check: False
+  eval_dataset:
+  exp_tag_name: 
+  audio_dir:  
+
 defaults:
   - model: MT3Net
   - dataset: Slakh
-  # TODO: we need to specify num_samples_per_batch here from 8 to 12

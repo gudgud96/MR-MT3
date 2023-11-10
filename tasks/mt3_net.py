@@ -81,8 +81,61 @@ class MT3Net(pl.LightningModule):
                     token_str = token_str + get_token_name(token) + ', '
                 plugin_list.append(token_str)        
         s = pd.Series(plugin_list, name="token sequence")
-        logger.logger.experiment.add_text(tag, s.to_markdown(), global_step=self.global_step)   
-     
+        logger.logger.experiment.add_text(tag, s.to_markdown(), global_step=self.global_step)
+
+
+class MT3NetCTC(MT3Net):
+    def __init__(self, config, optim_cfg):
+        super().__init__(config, optim_cfg)
+        self.loss_fct = nn.CTCLoss(blank=0, zero_infinity=True) # need to use 2 to avoid Nan
+        # https://discuss.pytorch.org/t/ctcloss-predicts-blanks-after-a-few-batches/40190/8
+
+    def training_step(self, batch, batch_idx):
+        inputs, targets = batch
+        lm_logits = self.forward(inputs=inputs, labels=targets)
+
+        if targets is not None:
+            # finding the first occurance of eos
+            # and use the index to be the target length
+            target_lengths = ((targets == 1).cumsum(1).cumsum(1)==1).float().argsort(1)[:,-1]
+            input_lengths = ((lm_logits.argmax(-1) == 1).cumsum(1).cumsum(1)==1).float().argsort(1)[:,-1]
+
+            loss = self.loss_fct(
+                lm_logits.transpose(0,1).log_softmax(-1),
+                targets,
+                input_lengths=input_lengths,
+                target_lengths=target_lengths
+            )
+        self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
+        return loss
+
+    @torch.no_grad()
+    def validation_step(self, batch, batch_idx):
+        inputs, targets = batch
+        lm_logits = self.forward(inputs=inputs, labels=targets)
+
+        if targets is not None:
+            # finding the first occurance of eos
+            # and use the index to be the target length
+            target_lengths = ((targets == 1).cumsum(1).cumsum(1)==1).float().argsort(1)[:,-1]
+            input_lengths = ((lm_logits.argmax(-1) == 1).cumsum(1).cumsum(1)==1).float().argsort(1)[:,-1]
+
+            loss = self.loss_fct(
+                lm_logits.transpose(0,1).log_softmax(-1),
+                targets,
+                input_lengths=input_lengths,
+                target_lengths=target_lengths
+            )
+        self.log('val_loss', loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+
+        if batch_idx == 0:
+            if self.current_epoch == 0:
+                self._log_text(targets, "val/targets", max_sentences=4, logger=self)
+            self._log_text(lm_logits.argmax(-1), "val/preds", max_sentences=4, logger=self)
+        
+        # no need to use it in this stage
+        # return loss
+
 
 
 class MT3NetWeightedLoss(pl.LightningModule):
