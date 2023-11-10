@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 import torch
 import pytorch_lightning as pl
 import os
+import math
 
 import hydra
 from tasks.mt3_net import MT3Net
@@ -21,8 +22,24 @@ from tasks.mt3_net import MT3Net
 @hydra.main(config_path="config", config_name="config")
 # def main(config, model_config, result_dir, mode, path):
 def main(cfg):
+    assert cfg.optim.num_steps_per_epoch == None, 'please keep cfg.optim.num_steps_per_epoch empty'
     # set seed to ensure reproducibility
     pl.seed_everything(cfg.seed)
+
+    train_loader = DataLoader(
+        hydra.utils.instantiate(cfg.dataset.train),
+        # SlakhDataset(**cfg.data.train), 
+        **cfg.dataloader.train,
+        collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
+    )
+
+    cfg.optim.num_steps_per_epoch = math.ceil(len(train_loader)/len(cfg.devices))
+
+    val_loader = DataLoader(
+        hydra.utils.instantiate(cfg.dataset.val),
+        **cfg.dataloader.val,
+        collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
+    )    
 
     model = hydra.utils.instantiate(cfg.model, optim_cfg=cfg.optim)
     logger = TensorBoardLogger(save_dir='.',
@@ -40,19 +57,6 @@ def main(cfg):
         logger=logger,
         callbacks=[lr_monitor, checkpoint_callback, tqdm_callback],
         **cfg.trainer
-    )
-
-    train_loader = DataLoader(
-        hydra.utils.instantiate(cfg.dataset.train),
-        # SlakhDataset(**cfg.data.train), 
-        **cfg.dataloader.train,
-        collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
-    )
-
-    val_loader = DataLoader(
-        hydra.utils.instantiate(cfg.dataset.val),
-        **cfg.dataloader.val,
-        collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
     )
 
     trainer.fit(

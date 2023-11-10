@@ -14,7 +14,7 @@ optim:
   lr: 6e-5
   warmup_steps: 5160
   num_epochs: ${num_epochs}
-  num_steps_per_epoch: 1289   # TODO: this is not good practice. Ideally we can get this from dataloader.
+  num_steps_per_epoch: # keep it empty since it will be parsed inside train.py
   min_lr: 5e-5
 
 grad_accum: 1
