@@ -23,3 +23,4 @@ config: # a hacky way to make this config works for T5 class
   vocab_size: 1536
   encoder_vocab_size: 1024
   xl_context_length: 2048
+optim_cfg: ${optim}

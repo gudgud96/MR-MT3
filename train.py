@@ -41,7 +41,7 @@ def main(cfg):
         collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
     )    
 
-    model = hydra.utils.instantiate(cfg.model, optim_cfg=cfg.optim)
+    model = hydra.utils.instantiate(cfg.model)
     logger = TensorBoardLogger(save_dir='.',
                                name=f"{cfg.model_type}_{cfg.dataset_type}")
     

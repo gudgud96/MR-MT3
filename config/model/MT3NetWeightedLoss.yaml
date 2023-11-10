@@ -23,3 +23,13 @@ config: # a hacky way to make this config works for T5 class
   vocab_size: 1536
   encoder_vocab_size: 1024
   xl_context_length: 2048
+loss_weights:
+  pitch: 1
+  velocity: 1
+  tie: 1
+  instrument: 1
+  drum: 1
+  time: 1
+  eos: 1
+
+optim_cfg: ${optim}
