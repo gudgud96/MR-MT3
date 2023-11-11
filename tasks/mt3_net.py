@@ -6,13 +6,17 @@ import torch.nn as nn
 from transformers import T5Config
 from models.t5 import T5ForConditionalGeneration
 from utils import get_cosine_schedule_with_warmup
+from test import get_scores
+import glob
+
 
 class MT3Net(pl.LightningModule):
 
-    def __init__(self, config, optim_cfg):
+    def __init__(self, config, optim_cfg, eval_cfg=None):
         super().__init__()
         self.config = config
         self.optim_cfg = optim_cfg
+        self.eval_cfg = eval_cfg
         T5config = T5Config.from_dict(OmegaConf.to_container(self.config))
         self.model: nn.Module = T5ForConditionalGeneration(T5config)
 
@@ -43,8 +47,26 @@ class MT3Net(pl.LightningModule):
             )
         self.log('val_loss', loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         
-        # no need to use it in this stage
-        # return loss
+    @torch.no_grad()
+    def on_validation_epoch_end(self):
+        if self.global_rank == 0:
+            if self.current_epoch >= self.eval_cfg.eval_after_num_epoch:
+                if self.current_epoch % self.eval_cfg.eval_per_epoch == 0:
+                    audio_dir = sorted(glob.glob(self.eval_cfg.audio_dir))
+                    if self.eval_cfg.eval_first_n_examples:
+                        audio_dir = audio_dir[:self.eval_cfg.eval_first_n_examples]
+                    
+                    scores = get_scores(
+                        model=self.model, 
+                        eval_audio_dir=audio_dir,
+                        eval_dataset="Slakh",
+                        ground_truth_midi_dir=self.eval_cfg.midi_dir,
+                        verbose=False
+                    )
+
+                    self.log('val_onset_f1_flat', scores["Onset F1"], on_step=False, on_epoch=True)
+                    self.log('val_onset_f1_midi_class', scores["Onset + program F1 (midi_class)"], on_step=False, on_epoch=True)
+                    self.log('val_onset_f1_full', scores["Onset + program F1 (full)"], on_step=False, on_epoch=True)
 
     def configure_optimizers(self):
         optimizer = AdamW(self.model.parameters(), self.optim_cfg.lr)
@@ -69,7 +91,7 @@ class MT3Net(pl.LightningModule):
 
 class MT3NetWeightedLoss(pl.LightningModule):
 
-    def __init__(self, config, optim_cfg):
+    def __init__(self, config, optim_cfg, eval_cfg=None):
         super().__init__()
         self.config = config
         self.optim_cfg = optim_cfg

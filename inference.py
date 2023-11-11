@@ -58,7 +58,6 @@ class InferenceHandler:
             num_velocity_bins=1))
         self.vocab = vocabularies.vocabulary_from_codec(self.codec)
         self.device = device
-        self.model.to(self.device)
 
         self.mel_norm = mel_norm
         # if "pretrained/mt3.pth" in weight_path:
@@ -72,7 +71,6 @@ class InferenceHandler:
         frame_size = spectrogram_config.hop_width
         padding = [0, frame_size - len(audio) % frame_size]
         audio = np.pad(audio, padding, mode='constant')
-        print('audio', audio.shape, 'frame_size', frame_size)
         frames = spectrograms.split_audio(audio, spectrogram_config)
         num_frames = len(audio) // frame_size
         times = np.arange(num_frames) / \
@@ -167,22 +165,18 @@ class InferenceHandler:
                 invalid_programs = self._get_program_ids(valid_programs)
             else:
                 invalid_programs = None
-            # print('preprocessing', audio_path)
             inputs, frame_times = self._preprocess(audio)
             inputs_tensor = torch.from_numpy(inputs)
             results = []
             inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times, batch_size=batch_size)
-            print('inferencing', audio_path)
 
             if self.contiguous_inference:
                 inputs_tensor = torch.cat(inputs_tensor, dim=0)
                 frame_times = [torch.tensor(k) for k in frame_times]
                 frame_times = torch.cat(frame_times, dim=0)
-                print('inputs_tensor', inputs_tensor.shape, frame_times.shape)
                 inputs_tensor = [inputs_tensor]
                 frame_times = [frame_times]
 
-            self.model.cuda()
             for idx, batch in enumerate(inputs_tensor):
                 batch = batch.to(self.device)
 
@@ -200,7 +194,6 @@ class InferenceHandler:
                 filename = audio_path.split('/')[-1].split('.')[0]
                 outpath = f'./out/{filename}.mid'
             os.makedirs('/'.join(outpath.split('/')[:-1]), exist_ok=True)
-            print("saving", outpath)
             note_seq.sequence_proto_to_midi_file(event, outpath)
         
         except Exception as e:

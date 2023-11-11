@@ -46,11 +46,13 @@ trainer:
   devices: ${devices}
 
 eval:
-  is_sanity_check: False
-  eval_dataset:
-  exp_tag_name: 
-  audio_dir:
-  midi_dir:
+  eval_dataset: "Slakh"
+  eval_first_n_examples: 3
+  eval_after_num_epoch: 400
+  eval_per_epoch: 1
+  exp_tag_name: "test_midis"
+  audio_dir: "/data/slakh2100_flac_redux/validation/*/mix_16k.wav"
+  midi_dir: "/data/slakh2100_flac_redux/validation/"
 
 defaults:
   - model: MT3Net

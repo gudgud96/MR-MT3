@@ -1,6 +1,6 @@
 train:
   _target_: dataset.dataset_2_random.SlakhDataset # choosing which data class to use
-  root_dir: "/data2/kinwai/slakh2100_flac_redux/train"
+  root_dir: "/data/slakh2100_flac_redux/train"
   mel_length: ${mel_length}
   event_length: ${event_length}
   midi_folder: MIDI
@@ -9,7 +9,7 @@ train:
   num_rows_per_batch: ${num_rows_per_batch}
 val:
   _target_: dataset.dataset_2_random.SlakhDataset # choosing which data class to use
-  root_dir: "/data2/kinwai/slakh2100_flac_redux/validation/"
+  root_dir: "/data/slakh2100_flac_redux/validation/"
   mel_length: ${mel_length}
   event_length: ${event_length}
   midi_folder: MIDI

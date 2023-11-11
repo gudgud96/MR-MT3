@@ -14,6 +14,7 @@ optim:
   lr: 2e-4
   warmup_steps: 64500
   num_epochs: ${num_epochs}
+  num_steps_per_epoch: 1289   # TODO: this is not good practice. Ideally we can get this from dataloader.
   min_lr: 1e-4
 
 grad_accum: 1
@@ -43,6 +44,15 @@ trainer:
   log_every_n_steps: 100
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
+
+eval:
+  eval_dataset: "Slakh"
+  eval_first_n_examples: 1
+  eval_after_num_epoch: 400
+  eval_per_epoch: 1
+  exp_tag_name: "test_midis"
+  audio_dir: "/data/slakh2100_flac_redux/validation/*/mix_16k.wav"
+  midi_dir: "/data/slakh2100_flac_redux/validation/"
 
 defaults:
   - model: MT3Net
