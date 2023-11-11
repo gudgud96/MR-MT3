@@ -8,6 +8,7 @@ import os
 from tqdm import tqdm
 import librosa
 import hydra
+import numpy as np
 from evaluate import evaluate_main
 
 
@@ -26,8 +27,11 @@ def main(cfg):
     model.eval()
 
     dir = sorted(glob.glob(cfg.eval.audio_dir))
+    if cfg.eval.eval_dataset == "NSynth":
+        # NOTE: skip vocals and mallets. Both Slakh and ComMU dataset does not have vocals, and ComMU does not have mallets.
+        dir = [d for d in dir if "vocal" not in d and "mallet" not in d]
     if cfg.eval.is_sanity_check:
-        dir = dir[:10]
+        dir = dir[:100]
 
     mel_norm = False if "pretrained/mt3.pth" in cfg.path else True
     handler = InferenceHandler(
@@ -39,6 +43,8 @@ def main(cfg):
 
     def func(fname):
         audio, _ = librosa.load(fname, sr=16000)
+        if cfg.eval.eval_dataset == "NSynth":
+            audio = np.pad(audio, (int(0.05 * 16000), 0), "constant", constant_values=0)
         return audio
 
     print("Total songs:", len(dir))
@@ -51,7 +57,7 @@ def main(cfg):
         if cfg.eval.eval_dataset == "Slakh":
             name = fname.split("/")[-2]
             outpath = os.path.join(exp_tag_name, name, "mix.mid")
-        elif cfg.eval.eval_dataset == "ComMU":
+        elif cfg.eval.eval_dataset == "ComMU" or cfg.eval.eval_dataset == "NSynth":
             name = fname.split("/")[-1]
             outpath = os.path.join(exp_tag_name,  name.replace(".wav", ".mid"))
         else:
@@ -67,10 +73,12 @@ def main(cfg):
     
     print("Evaluating...")
     current_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    ground_truth_midi_dir = cfg.eval.midi_dir if cfg.eval.midi_dir else cfg.dataset.test.root_dir
+    
     evaluate_main(
         dataset_name=cfg.eval.eval_dataset,
         test_midi_dir=os.path.join(current_dir, cfg.eval.exp_tag_name),
-        ground_truth_midi_dir=cfg.dataset.test.root_dir,
+        ground_truth_midi_dir=ground_truth_midi_dir,
     )
 
 
