@@ -14,7 +14,13 @@
 
 1. Download ComMU dataset - `https://github.com/POZAlabs/ComMU-code/tree/master/dataset`
 
-2. `cd scripts` -> `./process_commu_dataset.sh`
+2. `cd scripts/commu/` -> `./process_commu_dataset.sh`
+
+### For NSynth
+
+1. Download NSynth dataset validation split.
+
+2. `cd scripts/nsynth/` -> `python3 convert_nsynth_json_to_midi.py`
 
 
 ## Training
@@ -41,7 +47,7 @@ With hydra, config can be overwritten in the CLI.
 python3 train.py --config-path "config" --config-name "config_commu"
 ```
 
-### Evaluation
+## Evaluation
 
 Refer to `test.sh`, which runs `test.py` that (1) transcribe MIDI files based on given `eval.audio_dir`; (2) compute multi-instrument F1 score.
 
