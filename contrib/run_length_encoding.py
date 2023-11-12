@@ -188,6 +188,62 @@ def encode_and_index_events(
     return (events, event_start_indices, event_end_indices,
             state_events, state_event_indices)
 
+def encode_and_index_events_new(
+    state: ES,
+    event_times: Sequence[float],
+    event_values: Sequence[T],
+    encode_event_fn: Callable[[ES, T, event_codec.Codec],
+                              Sequence[event_codec.Event]],
+    codec: event_codec.Codec,
+    frame_times: Sequence[float],
+    encoding_state_to_events_fn: Optional[
+        Callable[[ES], Sequence[event_codec.Event]]] = None,
+) -> Tuple[Sequence[int], Sequence[int], Sequence[int],
+           Sequence[int], Sequence[int]]:
+    """Encode a sequence of timed events and index to audio frame times.
+
+    Encodes time shifts as repeated single step shifts for later run length
+    encoding.
+
+    Optionally, also encodes a sequence of "state events", keeping track of the
+    current encoding state at each audio frame. This can be used e.g. to prepend
+    events representing the current state to a targets segment.
+
+    Args:
+      state: Initial event encoding state.
+      event_times: Sequence of event times.
+      event_values: Sequence of event values.
+      encode_event_fn: Function that transforms event value into a sequence of one
+          or more event_codec.Event objects.
+      codec: An event_codec.Codec object that maps Event objects to indices.
+      frame_times: Time for every audio frame.
+      encoding_state_to_events_fn: Function that transforms encoding state into a
+          sequence of one or more event_codec.Event objects.
+
+    Returns:
+      events: Encoded events and shifts.
+      event_start_indices: Corresponding start event index for every audio frame.
+          Note: one event can correspond to multiple audio indices due to sampling
+          rate differences. This makes splitting sequences tricky because the same
+          event can appear at the end of one sequence and the beginning of
+          another.
+      event_end_indices: Corresponding end event index for every audio frame. Used
+          to ensure when slicing that one chunk ends where the next begins. Should
+          always be true that event_end_indices[i] = event_start_indices[i + 1].
+      state_events: Encoded "state" events representing the encoding state before
+          each event.
+      state_event_indices: Corresponding state event index for every audio frame.
+    """
+    indices = np.argsort(event_times, kind='stable') # sort by time
+    event_steps = np.array([round(event_times[i] * codec.steps_per_second)
+                   for i in indices]) # convert time to frame number
+    event_values = np.array([(event_values[i].pitch,
+                     event_values[i].program,
+                     1 if event_values[i].velocity > 0 else 0,
+                     ) for i in indices])
+
+    return (event_steps, event_values)
+
 
 def decode_events(
     state: DS,
