@@ -9,6 +9,7 @@ path:
 event_length: 1024
 mel_length: 256
 num_rows_per_batch: 12
+split_frame_length: 2000
 
 optim:
   lr: 2e-4
@@ -22,10 +23,10 @@ grad_accum: 1
 dataloader:
   train:
     batch_size: 1
-    num_workers: 12
+    num_workers: 4
   val:
     batch_size: 1
-    num_workers: 12  
+    num_workers: 4
 
 modelcheckpoint:
   monitor: 'val_loss'
@@ -57,4 +58,3 @@ eval:
 defaults:
   - model: MT3Net
   - dataset: Slakh
-  # TODO: we need to specify num_samples_per_batch here from 8 to 12

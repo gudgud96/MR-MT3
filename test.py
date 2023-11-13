@@ -1,8 +1,8 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
-from inference import InferenceHandler
 import torch
+from inference import InferenceHandler
 import glob
 import os
 from tqdm import tqdm
@@ -20,7 +20,7 @@ def get_scores(
     exp_tag_name="test_midis",
     ground_truth_midi_dir=None,
     verbose=True
-):
+):  
     handler = InferenceHandler(
         model=model,
         device=torch.device('cuda'),
@@ -50,8 +50,8 @@ def get_scores(
             raise ValueError("Invalid dataset name.")
 
         handler.inference(
-            audio, 
-            fname, 
+            audio=audio, 
+            audio_path=fname, 
             outpath=outpath,
             batch_size=8,        # changing this might affect results of sequential-inference models (e.g. XL).
             max_length=256
@@ -74,7 +74,7 @@ def get_scores(
     return scores
 
 
-@hydra.main(config_path="config", config_name="config")
+@hydra.main(config_path="config", config_name="config", version_base="1.1")
 def main(cfg):
     # convert .ckpt to .pth
     assert cfg.path
@@ -87,6 +87,8 @@ def main(cfg):
     print(f"Loading weights from: {cfg.path}")
     model.load_state_dict(torch.load(cfg.path))
     model.eval()
+    if torch.cuda.is_available():
+        model.cuda()
 
     dir = sorted(glob.glob(cfg.eval.audio_dir))
     if cfg.eval.eval_dataset == "NSynth":

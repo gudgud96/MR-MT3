@@ -3,13 +3,14 @@ import math
 import os
 from typing import List
 
+import torch.nn as nn
+import torch
+
 import numpy as np
 from tqdm import tqdm
 from models.t5 import T5ForConditionalGeneration, T5Config
 from models.t5_xl import T5WithXLDecoder, T5Config
 # from models.t5_xl_instrument import T5WithXLDecoder, T5Config
-import torch.nn as nn
-import torch
 from contrib import spectrograms, vocabularies, note_sequences, metrics_utils
 import note_seq
 import traceback

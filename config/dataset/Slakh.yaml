@@ -7,6 +7,7 @@ train:
   inst_filename: inst_names.json
   audio_filename: mix_16k.wav
   num_rows_per_batch: ${num_rows_per_batch}
+  split_frame_length: ${split_frame_length}
 val:
   _target_: dataset.dataset_2_random.SlakhDataset # choosing which data class to use
   root_dir: "/data/slakh2100_flac_redux/validation/"
@@ -16,6 +17,7 @@ val:
   inst_filename: inst_names.json
   audio_filename: mix_16k.wav   
   num_rows_per_batch: ${num_rows_per_batch}
+  split_frame_length: ${split_frame_length}
 test:
   root_dir: "/data/slakh2100_flac_redux/test"
 collate_fn: dataset.dataset_2_random.collate_fn

@@ -24,6 +24,7 @@ import note_seq
 import seqio
 import t5.data
 import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 
 
 DECODED_EOS_ID = -1

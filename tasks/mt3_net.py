@@ -1,9 +1,24 @@
 from torch.optim import AdamW
 from omegaconf import OmegaConf
 import pytorch_lightning as pl
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
+
 import torch
+# NOTE: On Linux, Python's multiprocessing module default start method is "fork".
+# we need to set the start method to "spawn"
+# in order to properly use TF methods in PyTorch dataloader.
+try:
+    torch.multiprocessing.set_start_method('spawn')
+except RuntimeError:
+    pass
+
 import torch.nn as nn
 from transformers import T5Config
+
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
+
+
 from models.t5 import T5ForConditionalGeneration
 from utils import get_cosine_schedule_with_warmup
 from test import get_scores
@@ -47,27 +62,28 @@ class MT3Net(pl.LightningModule):
             )
         self.log('val_loss', loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         
-    @torch.no_grad()
-    def on_validation_epoch_end(self):
-        if self.global_rank == 0:
-            if self.current_epoch >= self.eval_cfg.eval_after_num_epoch:
-                if self.current_epoch % self.eval_cfg.eval_per_epoch == 0:
-                    audio_dir = sorted(glob.glob(self.eval_cfg.audio_dir))
-                    if self.eval_cfg.eval_first_n_examples:
-                        audio_dir = audio_dir[:self.eval_cfg.eval_first_n_examples]
-                    
-                    scores = get_scores(
-                        model=self.model, 
-                        eval_audio_dir=audio_dir,
-                        eval_dataset="Slakh",
-                        ground_truth_midi_dir=self.eval_cfg.midi_dir,
-                        verbose=False
-                    )
+    @rank_zero_only
+    def validation_epoch_end(self, outs):
+        if self.current_epoch >= self.eval_cfg.eval_after_num_epoch:
+            if self.current_epoch % self.eval_cfg.eval_per_epoch == 0:
+                eval_audio_dir = sorted(glob.glob(self.eval_cfg.audio_dir))
+                if self.eval_cfg.eval_first_n_examples:
+                    eval_audio_dir = eval_audio_dir[:self.eval_cfg.eval_first_n_examples]
 
-                    self.log('val_onset_f1_flat', scores["Onset F1"], on_step=False, on_epoch=True)
-                    self.log('val_onset_f1_midi_class', scores["Onset + program F1 (midi_class)"], on_step=False, on_epoch=True)
-                    self.log('val_onset_f1_full', scores["Onset + program F1 (full)"], on_step=False, on_epoch=True)
+                self.model.eval()
+                scores = get_scores(
+                    model=self.model, 
+                    eval_audio_dir=eval_audio_dir,
+                    eval_dataset="Slakh",
+                    ground_truth_midi_dir=self.eval_cfg.midi_dir,
+                    verbose=False
+                )
+                print(scores)
 
+                self.log('val_f1_flat', scores['Onset F1'], on_step=False, on_epoch=True)
+                self.log('val_f1_midi_class', scores['Onset + program F1 (midi_class)'], on_step=False, on_epoch=True)
+                self.log('val_f1_full', scores['Onset + program F1 (full)'], on_step=False, on_epoch=True)
+    
     def configure_optimizers(self):
         optimizer = AdamW(self.model.parameters(), self.optim_cfg.lr)
         warmup_step = int(self.optim_cfg.warmup_steps)
