@@ -541,7 +541,7 @@ if __name__ == '__main__':
     print("drum", dataset.codec.event_type_range("drum"))
     dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
     for idx, item in enumerate(dl):
-        inputs, targets, x = item
-        print(idx, inputs.shape, targets[0], x[0][0].shape, x[0][1].shape)
+        inputs, targets = item
+        print(idx, inputs.shape, targets[0])
         break
     

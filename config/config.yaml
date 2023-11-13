@@ -9,6 +9,7 @@ path:
 event_length: 1024
 mel_length: 256
 num_rows_per_batch: 8
+split_frame_length: 2000
 
 optim:
   lr: 6e-5
