@@ -12,19 +12,22 @@ from torch.utils.data import DataLoader
 
 import torch
 import pytorch_lightning as pl
-import os
 
 import hydra
 from tasks.mt3_net import MT3Net
 
 
-@hydra.main(config_path="config", config_name="config")
+@hydra.main(config_path="config", config_name="config", version_base="1.1")
 # def main(config, model_config, result_dir, mode, path):
 def main(cfg):
     # set seed to ensure reproducibility
     pl.seed_everything(cfg.seed)
 
-    model = hydra.utils.instantiate(cfg.model, optim_cfg=cfg.optim)
+    model = hydra.utils.instantiate(
+        cfg.model, 
+        optim_cfg=cfg.optim,
+        eval_cfg=cfg.eval,
+    )
     logger = TensorBoardLogger(save_dir='.',
                                name=f"{cfg.model_type}_{cfg.dataset_type}")
     

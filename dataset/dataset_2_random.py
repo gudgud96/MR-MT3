@@ -11,7 +11,7 @@ import numpy as np
 import librosa
 import note_seq
 from glob import glob
-from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding, metrics_utils
+from contrib import spectrograms, vocabularies, note_sequences, run_length_encoding, metrics_utils, event_codec
 from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
 import soundfile as sf
 
@@ -33,7 +33,8 @@ class SlakhDataset(Dataset):
         midi_folder='MIDI', 
         inst_filename='inst_names.json',
         shuffle=True,
-        num_rows_per_batch=8
+        num_rows_per_batch=8,
+        split_frame_length=2000
     ) -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
@@ -52,6 +53,7 @@ class SlakhDataset(Dataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
         self.num_rows_per_batch = num_rows_per_batch
+        self.split_frame_length = split_frame_length
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
@@ -79,7 +81,6 @@ class SlakhDataset(Dataset):
                          [0, frame_size - len(samples) % frame_size],
                          mode='constant')
 
-        
         frames = spectrograms.split_audio(samples, self.spectrogram_config)
 
         num_frames = len(samples) // frame_size
@@ -365,17 +366,20 @@ class SlakhDataset(Dataset):
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
         row = self._tokenize(ns, audio, inst_names)
-
-        # NOTE: by default, this is self._split_frame(row, length=2000)
-        # this does not guarantee the chunks in `rows` to be contiguous.
-        # if we need to ensure that the chunks in `rows` to be contiguous, use:
-        # rows = self._split_frame(row, length=self.mel_length)
-        rows = self._split_frame(row)
+        
+        # NOTE: if split_frame_length != mel_length, then it does not guarantee the chunks in `rows` to be contiguous.
+        rows = self._split_frame(row, length=self.split_frame_length)
         
         inputs, targets, frame_times, num_insts = [], [], [], []
-        if len(rows) > self.num_rows_per_batch:
-            start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
-            rows = rows[start_idx : start_idx + self.num_rows_per_batch]
+
+        # randomly select N rows for training, as the GPU memory is limited
+        if self.num_rows_per_batch == -1:
+            # choose all rows in this case
+            pass
+        else:
+            if len(rows) > self.num_rows_per_batch:
+                start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
+                rows = rows[start_idx : start_idx + self.num_rows_per_batch]
         
         predictions = []
         # wavs = []
@@ -520,16 +524,6 @@ class SlakhDataset(Dataset):
 def collate_fn(lst):
     inputs = torch.cat([k[0] for k in lst])
     targets = torch.cat([k[1] for k in lst])
-    # num_insts = torch.cat([k[2] for k in lst])
-
-    # add random shuffling here
-    # indices = np.arange(inputs.shape[0])
-    # np.random.shuffle(indices)
-    # indices = torch.from_numpy(indices)
-    # inputs = inputs[indices]
-    # targets = targets[indices]
-    # num_insts = num_insts[indices]
-
     return inputs, targets
 
 if __name__ == '__main__':

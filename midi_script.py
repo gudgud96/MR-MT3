@@ -7,7 +7,9 @@ from tqdm import tqdm
 Use this for evaluation!!!
 """
 
-midis = sorted(glob.glob("/workspace/data/dataset/slakh2100_flac_redux/test/*/MIDI/"))
+# NOTE: change the following path accordingly
+midis = sorted(glob.glob("/data/slakh2100_flac_redux/validation/*/MIDI/"))
+# midis = sorted(glob.glob("/workspace/data/dataset/slakh2100_flac_redux/test/*/MIDI/"))
 for midi in tqdm(midis):
     stems = sorted(glob.glob(midi + "*.mid"))
     insts = []
