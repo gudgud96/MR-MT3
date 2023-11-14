@@ -75,6 +75,7 @@ class SlakhStemMixDataset(SlakhDataset):
         return df
 
     def _parse_midi(self, path, instrument_dict: Dict[str, str]):
+        # TODO: parse MIDI need to handle which stems selected
         note_seqs = []
 
         for filename in instrument_dict.keys():
@@ -86,11 +87,14 @@ class SlakhStemMixDataset(SlakhDataset):
     def __getitem__(self, idx):
         row = self.df[idx]
         ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
+
+        # TODO: parse audio need to handle which stems selected
         audio, sr = librosa.load(row['audio_path'], sr=None)
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
         
         # TODO: ns and audio needs to be augmented from randomly selected stems
+        # TODO: code starting from here should be sared
         
         row = self._tokenize(ns, audio, inst_names)
 
