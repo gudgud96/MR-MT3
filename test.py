@@ -76,16 +76,28 @@ def get_scores(
 
 @hydra.main(config_path="config", config_name="config", version_base="1.1")
 def main(cfg):
-    # convert .ckpt to .pth
     assert cfg.path
-    assert cfg.path.endswith(".pt") or cfg.path.endswith("pth"), "Only .pt / .pth files are supported."
+    assert cfg.path.endswith(".pt") or \
+            cfg.path.endswith("pth") or \
+            cfg.path.endswith("ckpt"), "Only .pt, .pth, .ckpt files are supported."
     assert cfg.eval.exp_tag_name
     assert cfg.eval.audio_dir
 
     pl = hydra.utils.instantiate(cfg.model, optim_cfg=cfg.optim)
-    model = pl.model
     print(f"Loading weights from: {cfg.path}")
-    model.load_state_dict(torch.load(cfg.path))
+    if cfg.path.endswith(".ckpt"):
+        # load lightning module from checkpoint
+        pl = pl.load_from_checkpoint(
+            cfg.path,
+            config=cfg.model.config,
+            optim_cfg=cfg.optim,
+        )
+        model = pl.model
+    else:
+        # load weights for nn.Module
+        model = pl.model
+        model.load_state_dict(torch.load(cfg.path))
+
     model.eval()
     if torch.cuda.is_available():
         model.cuda()
