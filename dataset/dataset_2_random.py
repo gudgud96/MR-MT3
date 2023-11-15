@@ -358,12 +358,17 @@ class SlakhDataset(Dataset):
         result = result.cpu().numpy()
         return result
     
-    def __getitem__(self, idx):
-        row = self.df[idx]
+    def _preprocess_inputs(self, row):
         ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
         audio, sr = librosa.load(row['audio_path'], sr=None)
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
+        
+        return ns, audio, inst_names
+    
+    def __getitem__(self, idx):
+        ns, audio, inst_names = self._preprocess_inputs(self.df[idx])
+        
         row = self._tokenize(ns, audio, inst_names)
 
         # NOTE: by default, this is self._split_frame(row, length=2000)
@@ -439,7 +444,6 @@ class SlakhDataset(Dataset):
         # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
         # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
         # ========== for reconstructing the MIDI from events =========== #  
-        # num_insts = np.stack(num_insts)
 
         return torch.stack(inputs), torch.stack(targets)
     
