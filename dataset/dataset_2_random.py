@@ -378,14 +378,14 @@ class SlakhDataset(Dataset):
             rows = rows[start_idx : start_idx + self.num_rows_per_batch]
         
         predictions = []
-        # wavs = []
+        wavs = []
         fake_start = None
         for j, row in enumerate(rows):
             row = self._random_chunk(row)
             row = self._extract_target_sequence_with_indices(row, self.tie_token)
             row = self._run_length_encode_shifts(row)
             
-            # wavs.append(row["inputs"].reshape(-1,))
+            wavs.append(row["inputs"].reshape(-1,))
             # sf.write(f"test_{j}.wav", row["inputs"].reshape(-1,), 16000, "PCM_24")
 
             row = self._compute_spectrogram(row)
@@ -404,40 +404,40 @@ class SlakhDataset(Dataset):
             targets.append(row["targets"])   
 
             # ========== for reconstructing the MIDI from events =========== #
-            # result = row["targets"]
-            # EOS_TOKEN_ID = 1    # TODO: this is a hack!
-            # after_eos = torch.cumsum(
-            #     (result == EOS_TOKEN_ID).float(), dim=-1
-            # )
-            # result -= self.vocab.num_special_tokens()
-            # result = torch.where(after_eos.bool(), -1, result)
+            result = row["targets"]
+            EOS_TOKEN_ID = 1    # TODO: this is a hack!
+            after_eos = torch.cumsum(
+                (result == EOS_TOKEN_ID).float(), dim=-1
+            )
+            result -= self.vocab.num_special_tokens()
+            result = torch.where(after_eos.bool(), -1, result)
 
-            # print("start_times", row["input_times"][0])
-            # if fake_start is None:
-            #     fake_start = row["input_times"][0]
-            # # predictions = []
-            # predictions.append({
-            #     'est_tokens': result.cpu().detach().numpy(),    # has to be numpy here, or else problematic
-            #     # 'start_time': row["input_times"][0] - fake_start,
-            #     'start_time': j * 2.048,
-            #     # 'start_time': 0,
-            #     'raw_inputs': []
-            # })
+            print("start_times", row["input_times"][0])
+            if fake_start is None:
+                fake_start = row["input_times"][0]
+            # predictions = []
+            predictions.append({
+                'est_tokens': result.cpu().detach().numpy(),    # has to be numpy here, or else problematic
+                # 'start_time': row["input_times"][0] - fake_start,
+                'start_time': j * 2.048,
+                # 'start_time': 0,
+                'raw_inputs': []
+            })
 
-            # # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
-            # # result = metrics_utils.event_predictions_to_ns(
-            # #     predictions, codec=self.codec, encoding_spec=encoding_spec)
-            # # note_seq.sequence_proto_to_midi_file(result['est_ns'], f"test_out_{j}.mid")   
+            # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
+            # result = metrics_utils.event_predictions_to_ns(
+            #     predictions, codec=self.codec, encoding_spec=encoding_spec)
+            # note_seq.sequence_proto_to_midi_file(result['est_ns'], f"test_out_{j}.mid")   
             # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
 
              # ========== for reconstructing the MIDI from events =========== #
         
         # ========== for reconstructing the MIDI from events =========== #
-        # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
-        # result = metrics_utils.event_predictions_to_ns(
-        #     predictions, codec=self.codec, encoding_spec=encoding_spec)
-        # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
-        # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
+        encoding_spec = note_sequences.NoteEncodingWithTiesSpec
+        result = metrics_utils.event_predictions_to_ns(
+            predictions, codec=self.codec, encoding_spec=encoding_spec)
+        note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
+        sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
         # ========== for reconstructing the MIDI from events =========== #  
         # num_insts = np.stack(num_insts)
 
