@@ -1,0 +1,23 @@
+num_epochs: 400
+devices: 1
+mode: "train"
+model_type: ${hydra:runtime.choices.model} # parse the filename of the config
+dataset_type: ${hydra:runtime.choices.dataset}
+seed: 365
+path:
+
+event_length: 1024
+mel_length: 256
+num_rows_per_batch: 8
+
+grad_accum: 1
+
+dataloader:
+  val:
+    batch_size: 1
+    num_workers: 0
+    shuffle: False
+
+defaults:
+  - model: MT3Net
+  - dataset: SlakhNew

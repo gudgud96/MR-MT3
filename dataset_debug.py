@@ -19,7 +19,7 @@ import hydra
 from tasks.mt3_net import MT3Net
 
 
-@hydra.main(config_path="config", config_name="config")
+@hydra.main(config_path="config", config_name="debug")
 # def main(config, model_config, result_dir, mode, path):
 def main(cfg):
     val_loader = DataLoader(

@@ -16,6 +16,7 @@ val:
   inst_filename: inst_names.json
   audio_filename: mix_16k.wav   
   num_rows_per_batch: ${num_rows_per_batch}
+  shuffle: False
 test:
   root_dir: "/data/slakh2100_flac_redux/validation"
 collate_fn: dataset.dataset_2_random.collate_fn
