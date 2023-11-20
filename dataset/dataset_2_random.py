@@ -33,7 +33,8 @@ class SlakhDataset(Dataset):
         midi_folder='MIDI', 
         inst_filename='inst_names.json',
         shuffle=True,
-        num_rows_per_batch=8
+        num_rows_per_batch=8,
+        split_frame_length=2000
     ) -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
@@ -52,10 +53,12 @@ class SlakhDataset(Dataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
         self.num_rows_per_batch = num_rows_per_batch
+        self.split_frame_length = split_frame_length
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
-        audio_files = sorted(glob(f'{root_dir}/**/{self.audio_filename}'))
+        audio_files = sorted(glob(f'{root_dir}/**/{self.audio_filename}'))[:1]
+        print(audio_files)
         print("root_dir", root_dir, len(audio_files), self.audio_filename)
         for a_f in audio_files:
             inst_path = a_f.replace(self.audio_filename, self.inst_filename)
@@ -374,8 +377,8 @@ class SlakhDataset(Dataset):
         # NOTE: by default, this is self._split_frame(row, length=2000)
         # this does not guarantee the chunks in `rows` to be contiguous.
         # if we need to ensure that the chunks in `rows` to be contiguous, use:
-        # rows = self._split_frame(row, length=self.mel_length)
-        rows = self._split_frame(row)
+        rows = self._split_frame(row, length=self.split_frame_length)
+        # rows = self._split_frame(row)
         
         inputs, targets, frame_times, num_insts = [], [], [], []
         if len(rows) > self.num_rows_per_batch:
@@ -398,11 +401,11 @@ class SlakhDataset(Dataset):
             # -- random order augmentation --
             # If turned on, comment out `is_redundant` code in `run_length_encoding`
             # print("=======")
-            # print(j, [self.get_token_name(t) for t in row["targets"]])
             t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
             t = np.array([self.token_to_idx(k) for k in t])
             t = self._remove_redundant_tokens(t)
             row["targets"] = t
+            # print(j, [self.get_token_name(t) for t in row["targets"]])
             
             row = self._pad_length(row)
             inputs.append(row["inputs"])
@@ -538,11 +541,12 @@ def collate_fn(lst):
 
 if __name__ == '__main__':
     dataset = SlakhDataset(
-        root_dir='/data/slakh2100_flac_redux/test/',
+        root_dir='/data/slakh2100_flac_redux/train/',
         shuffle=False,
         is_train=False,
         include_ties=True,
-        mel_length=256
+        mel_length=256,
+        split_frame_length=256
     )
     print("pitch", dataset.codec.event_type_range("pitch"))
     print("velocity", dataset.codec.event_type_range("velocity"))

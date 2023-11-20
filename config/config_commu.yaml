@@ -47,6 +47,9 @@ trainer:
 
 eval:
   is_sanity_check: False
+  eval_first_n_examples: 
+  eval_after_num_epoch: 400
+  eval_per_epoch: 1
   eval_dataset:
   exp_tag_name: 
   audio_dir:

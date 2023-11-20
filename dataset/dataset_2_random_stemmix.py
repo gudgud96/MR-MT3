@@ -107,7 +107,10 @@ class SlakhStemMixDataset(SlakhDataset):
         return chosen_audio_stems, chosen_midi_stems, instrument_values
 
     def _preprocess_inputs(self, row):
-        chosen_audio_stems, chosen_midi_stems, inst_names = self._random_stem_mix(row)
+        chosen_audio_stems, chosen_midi_stems, inst_names = self._random_stem_mix(
+            row,
+            num_stems_to_mix=None
+        )
         ns = self._parse_midi(chosen_midi_stems)
         audio = self._parse_audio(chosen_audio_stems)
         
@@ -129,6 +132,8 @@ if __name__ == '__main__':
         mel_length=256
     )
     for item in dataset:
+        inputs, targets = item
+        print(inputs.shape, targets)
         break
     
     # print("pitch", dataset.codec.event_type_range("pitch"))

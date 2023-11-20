@@ -18,6 +18,7 @@ import dataclasses
 
 from ddsp import spectral_ops
 import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 
 # defaults for spectrogram config
 DEFAULT_SAMPLE_RATE = 16000

@@ -158,6 +158,7 @@ class InferenceHandler:
         num_beams=1, 
         batch_size=5,
         max_length=1024,
+        verbose=False
     ):
         """
         `contiguous_inference` is True only for XL models as context from previous chunk is needed.
@@ -175,16 +176,17 @@ class InferenceHandler:
             print('inferencing', audio_path)
 
             if self.contiguous_inference:
+                print("Enabled contiguous inference")
                 inputs_tensor = torch.cat(inputs_tensor, dim=0)
                 frame_times = [torch.tensor(k) for k in frame_times]
                 frame_times = torch.cat(frame_times, dim=0)
-                print('inputs_tensor', inputs_tensor.shape, frame_times.shape)
                 inputs_tensor = [inputs_tensor]
                 frame_times = [frame_times]
 
             self.model.cuda()
             for idx, batch in enumerate(inputs_tensor):
                 batch = batch.to(self.device)
+                print('batch', batch.shape)
 
                 result = self.model.generate(inputs=batch, max_length=max_length, num_beams=num_beams, do_sample=False,
                                             length_penalty=0.4, eos_token_id=self.model.config.eos_token_id, 
@@ -195,7 +197,11 @@ class InferenceHandler:
                 result = self._postprocess_batch(result)
                 results.append(result)
             
-            event = self._to_event(results, frame_times)
+            event, predictions = self._to_event(results, frame_times)
+            # if verbose:
+            #     for i in range(len(predictions)):
+            #         print(f"frame {i}: {[self.get_token_name(k) for k in predictions[i]['est_tokens']]}")
+            
             if outpath is None:
                 filename = audio_path.split('/')[-1].split('.')[0]
                 outpath = f'./out/{filename}.mid'
@@ -234,4 +240,23 @@ class InferenceHandler:
         encoding_spec = note_sequences.NoteEncodingWithTiesSpec
         result = metrics_utils.event_predictions_to_ns(
             predictions, codec=self.codec, encoding_spec=encoding_spec)
-        return result['est_ns']
+        return result['est_ns'], predictions
+    
+    def get_token_name(self, token_idx):
+        token_idx = int(token_idx)
+        if token_idx >= 1001 and token_idx <= 1128:
+            token = f"pitch_{token_idx - 1001}"
+        elif token_idx >= 1129 and token_idx <= 1130:
+            token = f"velocity_{token_idx - 1129}"
+        elif token_idx >= 1131 and token_idx <= 1131:
+            token = "tie"
+        elif token_idx >= 1132 and token_idx <= 1259:
+            token = f"program_{token_idx - 1132}"
+        elif token_idx >= 1260 and token_idx <= 1387:
+            token = f"drum_{token_idx - 1260}"
+        elif token_idx >= 0 and token_idx < 1000:
+            token = f"shift_{token_idx}"
+        else:
+            token = f"invalid_{token_idx}"
+        
+        return token
