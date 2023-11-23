@@ -20,6 +20,7 @@ from transformers import T5Config, T5PreTrainedModel
 from transformers.models.t5.modeling_t5 import Seq2SeqLMOutput, BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions, checkpoint, T5LayerNorm, T5Block
 from transformers.utils import logging
 import torch.nn as nn
+import torch.nn.functional as F
 import copy
 import torch
 from einops import rearrange
@@ -44,11 +45,17 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         r"decoder\.block\.0\.layer\.1\.EncDecAttention\.relative_attention_bias\.weight",
     ]
 
-    def __init__(self, config: T5Config):
+    def __init__(
+        self, 
+        config: T5Config,
+        segmem_num_layers: int = 1,
+        segmem_length: int = 64,
+    ):
         super().__init__(config)
         self.model_dim = config.d_model
         # NOTE: temporary change, for MT3 please uncomment this line
         self.proj = nn.Linear(self.model_dim, self.model_dim, bias=False)
+        self.segmem_proj = nn.Linear(self.model_dim, self.model_dim, bias=False)
         
         # NOTE: for encodec model please uncomment this line
         # self.proj = nn.Embedding(
@@ -70,8 +77,15 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         self.decoder = T5Stack(decoder_config, self.decoder_embed_tokens)
 
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
-        # self.mean_pool = nn.AdaptiveAvgPool1d(1)
-        # self.num_inst_cls = nn.Linear(config.d_model, 16)
+        
+        segmem_config = copy.deepcopy(config)
+        segmem_config.is_decoder = False
+        segmem_config.use_cache = False
+        segmem_config.is_encoder_decoder = False
+        # print('segmem_num_layers', segmem_num_layers)
+        segmem_config.num_layers = segmem_num_layers
+        self.segmem_encoder = T5Stack(segmem_config, self.segmem_proj)
+        self.segmem_length = segmem_length
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -121,7 +135,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
                 decoder_head_mask = head_mask
         if inputs is not None:
             inputs_embeds = self.proj(inputs)
-
         # Encode if needed (training, first prediction pass)
         if encoder_outputs is None:
             # Convert encoder inputs in embeddings if needed
@@ -148,10 +161,31 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
             # get decoder inputs from shifting lm labels to the right
             decoder_input_ids = self._shift_right(labels)
+        
+        assert decoder_inputs_embeds is None
+        # print('decoder_input_ids', decoder_input_ids[0][:500])
+        decoder_inputs_embeds = self.decoder_embed_tokens(decoder_input_ids)                # (b, l, d)
+
+        dummy_tensor = torch.tensor([0 for _ in range(labels.shape[1])]).to(self.device)
+        dummy_tensor[0] = 1
+        segmem_ids = torch.cat([
+            decoder_input_ids[:, 1:], 
+            torch.zeros(decoder_input_ids.shape[0], 1).to(self.device)
+        ], dim=1)
+
+        segmem_ids = torch.cat([dummy_tensor.unsqueeze(0), segmem_ids[:-1]], dim=0).long()
+        segmem_embeds = self.decoder_embed_tokens(segmem_ids)                               # (b, l, d)
+        segmem_embeds_agg = self.segmem_encoder(segmem_embeds)[0]                           # (b, l, d)
+        segmem_embeds_agg = segmem_embeds_agg[:, :self.segmem_length, :]                    # (b, segmem_length, d)
+
+        decoder_inputs_embeds = torch.cat([
+            segmem_embeds_agg,
+            decoder_inputs_embeds, 
+        ], dim=1)                                                                           # (b, l + segmem_length, d)
 
         # Decode
         decoder_outputs = self.decoder(
-            input_ids=decoder_input_ids,
+            input_ids=None,
             attention_mask=decoder_attention_mask,
             inputs_embeds=decoder_inputs_embeds,
             past_key_values=past_key_values,
@@ -159,13 +193,14 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             encoder_attention_mask=attention_mask,
             head_mask=decoder_head_mask,
             cross_attn_head_mask=cross_attn_head_mask,
-            use_cache=False,
+            use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
 
-        sequence_output = decoder_outputs[0]
+        sequence_output = decoder_outputs[0]                                                # (b, l + segmem_length, d)
+        sequence_output = sequence_output[:, self.segmem_length:, :]                        # (b, l, d)           
 
         if self.config.tie_word_embeddings:
             # Rescale output before projecting on vocab
@@ -174,13 +209,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         
         lm_logits = self.lm_head(sequence_output)
         lm_tokens = torch.argmax(lm_logits, dim=-1)
-        print('lm_tokens')
-        for i in range(len(lm_tokens)):
-            print(lm_tokens[i][:32])
-
-        # mean_hidden_states = self.mean_pool(sequence_output.transpose(1, 2)).squeeze(-1)
-        # inst_cls_logits = self.num_inst_cls(mean_hidden_states)
-        
         return lm_logits, encoder_outputs, decoder_outputs
 
     def forward(
@@ -228,11 +256,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         >>> print(tokenizer.decode(outputs[0], skip_special_tokens=True))
         >>> # studies have shown that owning a dog is good for you.
         ```"""
-        print('use_cache', use_cache, self.config.use_cache)
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        use_cache = False
-        print('use_cache in forward', use_cache)
-
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         
         lm_logits, encoder_outputs, decoder_outputs = self.get_model_outputs(
@@ -256,7 +280,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
 
         return lm_logits
     
-    def generate(self, inputs, decoder_input_ids_start=None, max_length=1024, output_hidden_states=False, **kwargs):
+    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
         batch_size = inputs.shape[0]
         inputs_embeds = self.proj(inputs)
         encoder_outputs = self.encoder(
@@ -264,51 +288,75 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             return_dict=True
         )
         hidden_states = encoder_outputs[0]
+        
+        # Decode
+        # In this case, we need to decode each batch sequentially
+        bs = hidden_states.size(0)
+        segmem_ids = None
+        outs_lst = []
 
-        if decoder_input_ids_start is None:
-            decoder_input_ids_start = torch.ones((batch_size, 1), dtype=torch.long, device=self.device) * \
-                                        self.config.decoder_start_token_id
-        
-        # keep track of which sequences are already finished
-        unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=self.device)
-        eos_token_id_tensor = torch.tensor(self.config.eos_token_id).to(self.device)
-        
-        for l in range(max_length):
-            decoder_outputs = self.decoder(
-                input_ids=decoder_input_ids_start,
-                encoder_hidden_states=hidden_states,
-                # output_hidden_states=output_hidden_states,
-                return_dict=True,
+        for i in range(bs):
+            print(i + 1, '/', bs)
+            decoder_tokens = torch.zeros((1, 1), dtype=torch.long, device=self.device)          # (b, 1)
+            cur_enc = hidden_states[i].unsqueeze(0)
+
+            if i == 0:
+                # create dummy segmem ids
+                segmem_ids = torch.tensor([
+                    0 for _ in range(max_length)
+                ]).to(self.device)
+                segmem_ids[0] = 1
+                segmem_ids = segmem_ids.unsqueeze(0)                                            # (b, max_length)
+            else:
+                assert segmem_ids is not None
+            
+            segmem_embeds = self.decoder_embed_tokens(segmem_ids)
+            segmem_embeds_agg = self.segmem_encoder(segmem_embeds)[0]                           # (b, max_length, d)
+            segmem_embeds_agg = segmem_embeds_agg[:, :self.segmem_length, :]   
+
+            decoder_embeds = self.decoder_embed_tokens(decoder_tokens)                          # (b, 1, d)
+            decoder_embeds = torch.cat([
+                segmem_embeds_agg,
+                decoder_embeds, 
+            ], dim=1)                                                                           # (b, segmem_length + 1, d)
+
+            assert decoder_embeds.shape[1] == self.segmem_length + 1
+            
+            for l in tqdm(range(max_length)):  
+                decoder_outputs = self.decoder(
+                    input_ids=None,
+                    inputs_embeds=decoder_embeds,
+                    encoder_hidden_states=cur_enc,
+                    return_dict=True,
+                )
+                sequence_output = decoder_outputs[0]                                            # (b, l + segmem_length, d)
+                sequence_output = sequence_output[:, self.segmem_length:, :]                    # (b, l, d)     
+
+                lm_logits = self.lm_head(sequence_output)[:, -1, :]
+                cur = torch.argmax(lm_logits, dim=-1)
+
+                decoder_tokens = torch.cat([decoder_tokens, cur.unsqueeze(1)], dim=1)
+                if cur.squeeze().item() == self.config.eos_token_id:
+                    break
+                
+                decoder_embeds = self.decoder_embed_tokens(decoder_tokens)
+                decoder_embeds = torch.cat([
+                    segmem_embeds_agg,
+                    decoder_embeds, 
+                ], dim=1)
+            
+            decoder_tokens = F.pad(
+                decoder_tokens,
+                (0, max_length - decoder_tokens.shape[1]),
+                value=0
             )
+            outs_lst.append(decoder_tokens)
 
-            # handle output hidden states
-            # if output_hidden_states:
-            #     hidden_states = decoder_outputs.hidden_states # (num_layers + 1, batch_size, 1, hidden_size)
-            #     print('hidden states', hidden_states[0].shape)
-            #     hidden_states = [torch.cat(layer, dim=0) for layer in hidden_states]
-            #     print('dec hidden states', hidden_states[0].shape)
-            #     hidden_states = torch.cat(hidden_states, dim=0)
-            #     print('dec hidden states', hidden_states.shape)
-            
-            sequence_output = decoder_outputs[0]
-            lm_logits = self.lm_head(sequence_output)
-            next_tokens = torch.argmax(lm_logits[:, -1, :].unsqueeze(1), dim=-1)
+            segmem_ids = decoder_tokens
+        
+        outs_lst = torch.cat(outs_lst, dim=0)
+        return outs_lst
 
-            # next_tokens = next_tokens * unfinished_sequences.unsqueeze(-1) + self.config.pad_token_id * (1 - unfinished_sequences.unsqueeze(-1))
-            # eos_indices = torch.where(next_tokens == self.config.eos_token_id)[0]
-            # unfinished_sequences[eos_indices] = 0
-            decoder_input_ids_start = torch.cat([decoder_input_ids_start, next_tokens], dim=-1)
-
-            # stop when each sentence is finished
-            # if unfinished_sequences.max() == 0:
-            #     break
-            
-            # print(l, decoder_input_ids_start.shape)
-        if output_hidden_states:
-            return decoder_input_ids_start, hidden_states
-        else:
-            return decoder_input_ids_start
-    
     def prepare_inputs_for_generation(
         self,
         input_ids,
@@ -366,121 +414,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             reordered_decoder_past = reordered_decoder_past + \
                 (reordered_layer_past_states,)
         return reordered_decoder_past
-
-
-# ================= adversarial attacks ============== #
-# These two methods only noises the input, and expect the output y to stay the same
-# This is an end-to-end approach. We did not include noising for the autoregressive part.
-# Hence, we are assuming that this method affects more on the encoder, ensuring the encoder output 
-# to be resilient to adversarial noise.
-
-
-class T5Adversarial(T5ForConditionalGeneration):
-    def __init__(self, config: T5Config):
-        super().__init__(config)
-    
-    def fgsm(self, inputs, labels, epsilon=0.1):
-        delta = torch.zeros_like(inputs, requires_grad=True)
-        lm_logits, _, _ = self.get_model_outputs(inputs=inputs, labels=labels)
-        loss = nn.CrossEntropyLoss(ignore_index=-100)(
-            lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1)
-        )
-        loss.backward()
-        return epsilon * delta.grad.detach().sign()
-
-    def pgd_linf(self, inputs, labels, epsilon=0.1, alpha=0.01, num_iter=5):
-        delta = torch.zeros_like(inputs, requires_grad=True)
-        
-        for _ in range(num_iter):
-            lm_logits, _, _ = self.get_model_outputs(inputs=inputs + delta, labels=labels)
-            loss = nn.CrossEntropyLoss(ignore_index=-100)(
-                lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1)
-            )
-            loss.backward()
-            delta.data = (delta + alpha*delta.grad.detach().sign()).clamp(-epsilon,epsilon)
-            delta.grad.zero_()
-        return delta.detach()
-    
-    # def forward(
-    #     self,
-    #     inputs: Optional[torch.FloatTensor] = None,
-    #     attention_mask: Optional[torch.FloatTensor] = None,
-    #     decoder_input_ids: Optional[torch.LongTensor] = None,
-    #     decoder_attention_mask: Optional[torch.BoolTensor] = None,
-    #     head_mask: Optional[torch.FloatTensor] = None,
-    #     decoder_head_mask: Optional[torch.FloatTensor] = None,
-    #     cross_attn_head_mask: Optional[torch.Tensor] = None,
-    #     encoder_outputs: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-    #     past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-    #     inputs_embeds: Optional[torch.FloatTensor] = None,
-    #     decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
-    #     labels: Optional[torch.LongTensor] = None,
-    #     use_cache: Optional[bool] = None,
-    #     output_attentions: Optional[bool] = None,
-    #     output_hidden_states: Optional[bool] = None,
-    #     return_dict: Optional[bool] = None,
-    #     attack = "fgsm",
-    #     attack_epsilon = 0.1
-    # ) -> Union[Tuple[torch.FloatTensor], Seq2SeqLMOutput]:
-    #     """
-    #     The adversarial version (on encoder should be):
-
-    #     """
-    #     use_cache = use_cache if use_cache is not None else self.config.use_cache
-    #     return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-    #     # if attack == "fgsm":
-    #     #     delta = self.fgsm(
-    #     #         inputs, labels, epsilon=attack_epsilon
-    #     #     )
-    #     # else:
-    #     delta = torch.zeros_like(inputs, requires_grad=True)
-
-    #     # print("delta", delta)
-        
-    #     lm_logits, encoder_outputs, decoder_outputs = self.get_model_outputs(
-    #         inputs=inputs + delta,
-    #         attention_mask=attention_mask,
-    #         decoder_input_ids=decoder_input_ids,
-    #         decoder_attention_mask=decoder_attention_mask,
-    #         head_mask=head_mask,
-    #         decoder_head_mask=decoder_head_mask,
-    #         cross_attn_head_mask=cross_attn_head_mask,
-    #         encoder_outputs=encoder_outputs,
-    #         past_key_values=past_key_values,
-    #         inputs_embeds=inputs_embeds,
-    #         decoder_inputs_embeds=decoder_inputs_embeds,
-    #         labels=labels,
-    #         use_cache=use_cache,
-    #         output_attentions=output_attentions,
-    #         output_hidden_states=output_hidden_states,
-    #         return_dict=return_dict,
-    #     )
-
-    #     loss = None
-    #     if labels is not None:
-    #         loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-    #         loss = loss_fct(
-    #             lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1)
-    #         )
-
-    #     if not return_dict:
-    #         output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
-    #         print("return dict")
-    #         return ((loss,) + output) if loss is not None else output
-        
-    #     print("return here", loss)
-    #     return Seq2SeqLMOutput(
-    #         loss=loss,
-    #         logits=lm_logits,
-    #         past_key_values=decoder_outputs.past_key_values,
-    #         decoder_hidden_states=decoder_outputs.hidden_states,
-    #         decoder_attentions=decoder_outputs.attentions,
-    #         cross_attentions=decoder_outputs.cross_attentions,
-    #         encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-    #         encoder_hidden_states=encoder_outputs.hidden_states,
-    #         encoder_attentions=encoder_outputs.attentions,
-    #     )
 
 
 class T5Stack(T5PreTrainedModel):

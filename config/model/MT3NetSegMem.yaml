@@ -24,4 +24,5 @@ config: # a hacky way to make this config works for T5 class
   encoder_vocab_size: 1024
   xl_context_length: 2048
   segmem_num_layers: 1
-  segmem_length: 64
+  segmem_length: 4
+  use_cache: False

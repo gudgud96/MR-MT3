@@ -34,7 +34,8 @@ class ComMUDataset(Dataset):
         midi_folder='MIDI', 
         inst_filename='inst_names.json',
         shuffle=True,
-        num_rows_per_batch=8
+        num_rows_per_batch=8,
+        is_randomize_tokens=False,
     ) -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
@@ -52,10 +53,12 @@ class ComMUDataset(Dataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
         self.num_rows_per_batch = num_rows_per_batch
+        self.is_randomize_tokens = is_randomize_tokens
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
-        audio_files = sorted(glob(f'{root_dir}/*.wav'))
+        audio_files = sorted(glob(f'{root_dir}/*.wav'))[:1]
+        print('audio_files', audio_files)
         print("root_dir", root_dir, len(audio_files))
         for a_f in audio_files:
             midi_path = a_f.replace("commu_audio_v2", "commu_midi_v2").replace("_16k.wav", ".mid")
@@ -197,14 +200,15 @@ class ComMUDataset(Dataset):
 
                 # NOTE: this needs to be uncommented if not using random-order augmentation
                 # because random-order augmentation use `_remove_redundant_tokens` to replace this part
-                # is_redundant = False
-                # for i, (min_index, max_index) in enumerate(state_change_event_ranges):
-                #     if (min_index <= event) and (event <= max_index):
-                #         if current_state[i] == event:
-                #             is_redundant = True
-                #         current_state[i] = event
-                # if is_redundant:
-                #     continue
+                if not self.is_randomize_tokens:
+                    is_redundant = False
+                    for i, (min_index, max_index) in enumerate(state_change_event_ranges):
+                        if (min_index <= event) and (event <= max_index):
+                            if current_state[i] == event:
+                                is_redundant = True
+                            current_state[i] = event
+                    if is_redundant:
+                        continue
 
                 # Once we've reached a non-shift event, RLE all previous shift events
                 # before outputting the non-shift event.
@@ -378,10 +382,11 @@ class ComMUDataset(Dataset):
             # If turned on, comment out `is_redundant` code in `run_length_encoding`
             # print("=======")
             # print(j, [self.get_token_name(t) for t in row["targets"]])
-            t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
-            t = np.array([self.token_to_idx(k) for k in t])
-            t = self._remove_redundant_tokens(t)
-            row["targets"] = t
+            if self.is_randomize_tokens:
+                t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
+                t = np.array([self.token_to_idx(k) for k in t])
+                t = self._remove_redundant_tokens(t)
+                row["targets"] = t
             
             row = self._pad_length(row)
             inputs.append(row["inputs"])
