@@ -14,6 +14,7 @@ optim:
   lr: 2e-4
   warmup_steps: 64500
   num_epochs: ${num_epochs}
+  num_steps_per_epoch: 1289   # TODO: this is not good practice. Ideally we can get this from dataloader.
   min_lr: 1e-4
 
 grad_accum: 1
@@ -21,10 +22,10 @@ grad_accum: 1
 dataloader:
   train:
     batch_size: 1
-    num_workers: 12
+    num_workers: 2
   val:
     batch_size: 1
-    num_workers: 12  
+    num_workers: 0
 
 modelcheckpoint:
   monitor: 'val_loss'
@@ -43,6 +44,19 @@ trainer:
   log_every_n_steps: 100
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
+  check_val_every_n_epoch: 10
+
+eval:
+  is_sanity_check: False
+  eval_first_n_examples: 
+  eval_after_num_epoch: 400
+  eval_per_epoch: 1
+  eval_dataset:
+  exp_tag_name: 
+  audio_dir:
+  midi_dir:
+  contiguous_inference:
+  batch_size: 8
 
 defaults:
   - model: MT3Net

@@ -158,6 +158,7 @@ class InferenceHandler:
         num_beams=1, 
         batch_size=5,
         max_length=1024,
+        verbose=False,
     ):
         """
         `contiguous_inference` is True only for XL models as context from previous chunk is needed.

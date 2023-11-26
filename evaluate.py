@@ -328,9 +328,7 @@ def evaluate_main(
                 
 
     mean_scores = {k: np.mean(v) for k, v in scores.items() if k != "F1 by program"}
-    for key in sorted(list(mean_scores)):
-        print("{}: {:.4}".format(key, mean_scores[key]))
-
+    
     if enable_instrument_eval:
         print("====")
         program_f1_dict = {}
@@ -362,6 +360,8 @@ def evaluate_main(
                 print("{}: {:.4}".format(d[key], program_f1_dict[key]))
             elif key * 8 in program_f1_dict:
                 print("{}: {:.4}".format(d[key], program_f1_dict[key * 8]))
+    
+    return mean_scores
 
 
 if __name__ == "__main__":

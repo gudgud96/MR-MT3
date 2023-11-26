@@ -1,9 +1,6 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-import tensorflow as tf
-tf.config.set_visible_devices([], 'GPU')
-
 import json
 import random
 from typing import Dict, List, Optional, Sequence, Tuple
