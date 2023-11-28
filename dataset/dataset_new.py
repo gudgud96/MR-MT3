@@ -199,7 +199,7 @@ class SlakhDataset(Dataset):
             # print('times', times)
             # print('values', values)
 
-        (event_steps, event_values) = (
+        (event_steps, event_times, event_values) = (
             run_length_encoding.encode_and_index_events_new(
                 state=note_sequences.NoteEncodingState() if self.include_ties else None,
                 event_times=times,
@@ -209,7 +209,7 @@ class SlakhDataset(Dataset):
                 frame_times=frame_times,
                 encoding_state_to_events_fn=(
                     note_sequences.note_encoding_state_to_events
-                    if self.include_ties else None)))
+                    if self.include_ties else None)))        
 
         # print('events', events)
         # print('inputs', np.array(frames).shape)
@@ -219,6 +219,7 @@ class SlakhDataset(Dataset):
             'inputs': np.array(frames),
             'input_times': frame_times,
             'targets': event_values,
+            'target_times': event_times,
             'global_event_steps': event_steps,
             # 'sequence': ns.SerializeToString()
         }    
@@ -356,7 +357,7 @@ class SlakhDataset(Dataset):
     def _pad_length_targets(self, row):
         # TODO: raise all classes by 1 to inclue Empty token
         for k in row.keys():
-            if k not in ['inputs', 'input_times'] and row[k].shape[0] < self.event_length:
+            if k not in ['inputs', 'input_times', 'local_event_steps'] and row[k].shape[0] < self.event_length:
                 # add a dimension to the numpy array if it is 1D
                 if row[k].dim() == 1:
                     row[k] = row[k].unsqueeze(1)
@@ -392,7 +393,7 @@ class SlakhDataset(Dataset):
         # chunk the audio into chunks of `length` = 2000
         # during _random_chunk, within each chunk, randomly select a segment = self.mel_length
         for split in range(0, input_length, length):
-            if split + length >= input_length:
+            if split + length >= input_length: # discard the last chunk if it is too short
                 continue
             new_row = {}
             for k in row.keys():
@@ -400,7 +401,7 @@ class SlakhDataset(Dataset):
                 seg_mask = (row['global_event_steps'] >= split) & (row['global_event_steps'] < split + length)
                 if k in ['inputs', 'input_times']:
                     new_row[k] = row[k][split:split+length]
-                elif k in ['targets', 'global_event_steps']:
+                elif k in ['targets', 'target_times', 'global_event_steps']:
                     new_row[k] = row[k][seg_mask]
                 else:
                     # if the key is not found, raise an error
@@ -435,11 +436,14 @@ class SlakhDataset(Dataset):
         if random_length < 1:
             return row
         start_length = random.randint(0, random_length)
+        # start_length = random.randint(0, random_length)
+        # TODO: revert back to normal after debugging
+        start_length = 0        
         for k in row.keys():
             seg_mask = (row['local_event_steps'] >= start_length) & (row['local_event_steps'] < start_length + self.mel_length) 
             if k in ['inputs', 'input_times']:
                 new_row[k] = row[k][start_length:start_length+self.mel_length]
-            elif k in ['targets', 'global_event_steps', 'local_event_steps']:
+            elif k in ['targets', 'target_times', 'global_event_steps', 'local_event_steps']:
                 new_row[k] = torch.tensor(row[k][seg_mask])
             else:
                 # if the key is not found, raise an error
@@ -483,6 +487,7 @@ class SlakhDataset(Dataset):
         row = self.df[idx]
         ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
         audio, sr = librosa.load(row['audio_path'], sr=None)
+        filename = row['audio_path'].split('/')[-2]
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
         row = self._tokenize(ns, audio, inst_names)
@@ -510,7 +515,7 @@ class SlakhDataset(Dataset):
 
         
         inputs, targets, frame_times, num_insts = [], [], [], []
-        inputs_new, targets_new, frame_times_new, num_insts_new = [], [], [], []
+        inputs_new, targets_new, frame_times_new, num_insts_new, local_frames = [], [], [], [], []
         if len(rows) > self.num_rows_per_batch:
             start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
             rows = rows[start_idx : start_idx + self.num_rows_per_batch]
@@ -560,16 +565,17 @@ class SlakhDataset(Dataset):
 
             print(f"old tokens: {plugin_list}")
             print(f"")
-            row = self._pad_length(row)
+            row = self._pad_length(row) # remove appending for better visualization
             for i, event in enumerate(row_new["targets"]):
-                print(f"<time_{row_new['local_event_steps'][i]}, program_{event[1]}, pitch_{event[0]}, vel_{event[2]}>")
-            row_new = self._pad_length_targets(row_new)
+                print(f"{row_new['target_times'][i]} <time_{row_new['local_event_steps'][i]}, program_{event[1]}, pitch_{event[0]}, vel_{event[2]}>")
+            # row_new = self._pad_length_targets(row_new) # new this to create negative samples
             inputs.append(row["inputs"])
             targets.append(row["targets"])
             inputs_new.append(row_new["inputs"])
             targets_new.append(row_new["targets"])
+            local_frames.append(row_new['local_event_steps'] +  j*256) # one chunk = 256 frames
 
-            # ========== for reconstructing the MIDI from events =========== #
+            # ========== for reconstructing the MIDI from MT3 events =========== #
             result = row["targets"]
             EOS_TOKEN_ID = 1    # TODO: this is a hack!
             after_eos = torch.cumsum(
@@ -596,15 +602,23 @@ class SlakhDataset(Dataset):
             # # note_seq.sequence_proto_to_midi_file(result['est_ns'], f"test_out_{j}.mid")   
             # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
 
-             # ========== for reconstructing the MIDI from events =========== #
-        
-        # ========== for reconstructing the MIDI from events =========== #
+             # ========== End of reconstructing the MIDI from events =========== #
+
+        # ===== Decoding the new tokens back to MIDI =======
+        total_targets_new = torch.vstack([targets_new[i] for i in range(len(targets_new))]) # combining different chunks
+        total_local_frames = torch.vstack([local_frames[i].unsqueeze(1) for i in range(len(local_frames))]) # combining different chunks
+        total_events = torch.cat(
+            (total_targets_new, total_local_frames),
+            dim=1) # combining events and time steps
+        total_events = sorted(total_events, key=lambda note: (note[0], note[1])) # sorting according to pitch and program
+        note_output, ophand_events = pred2midi2(total_events, output_filename=f"{filename}_new_decoded.mid")
+        # ========== for reconstructing the MIDI from MT3 events =========== #
         encoding_spec = note_sequences.NoteEncodingWithTiesSpec
         result = metrics_utils.event_predictions_to_ns(
             predictions, codec=self.codec, encoding_spec=encoding_spec)
-        note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
+        note_seq.sequence_proto_to_midi_file(result['est_ns'], f"{filename}_old_decoded.mid")   
         sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
-        # ========== for reconstructing the MIDI from events =========== #  
+        # ========== for reconstructing the MIDI from MT3 events =========== #  
         # num_insts = np.stack(num_insts)
 
         return torch.stack(inputs), torch.stack(targets)
@@ -717,3 +731,74 @@ if __name__ == '__main__':
         print(idx, inputs.shape, targets[0])
         break
     
+
+
+def pred2midi2(events, output_filename='new_token_decoded.mid', verbose=False):
+    step2time_factor = 125
+
+    state = None
+    prev_event = [-1, -1, -1, -1] # non active event
+    
+    # state = 1 if note is on
+    # state = 0 if note is off
+    ophand_events = [] # a list to store onset events without offsets
+
+    # putting everything back to ns_seq
+    # for drums it is instrument 9??
+    note_output = note_seq.NoteSequence(ticks_per_quarter=220)
+    for idx, event in enumerate(events):
+        message = []
+        event = event.tolist()
+        state = event[2]        
+        if event[1]==129: # when the current event is a drum
+            note_output.notes.add(
+                pitch=int(event[0]),
+                start_time= event[3] / step2time_factor,
+                end_time=(event[3] / step2time_factor)+1, # dummy offset for drums
+                velocity=120,
+                program=0,
+                is_drum=True,
+                instrument=0
+                )
+            # the drum event is comppleted, no need to save the event        
+        elif state == 1 and prev_event[2]!=state and event[1]!=129: # when the current event is an onset
+            onset_time = event[3] / step2time_factor # TODO: don't use hard-coded value
+            prev_event = event # use this to look for the offset event
+        elif state == 0 and prev_event[2]!=state: # when the current event is an offset
+            if prev_event[0] == event[0]: # check if the pitch is the same as the previous onset event
+                note_output.notes.add(
+                    pitch=int(event[0]),
+                    start_time=onset_time,
+                    end_time=event[3] / step2time_factor,
+                    velocity=80,
+                    program=int(event[1]),
+                    is_drum=False,
+                    instrument=0
+                    )
+                if prev_event[2] == state:
+                    message.append(f'Error: two consecutive off events @ {idx}')
+                    ophand_events.append(event) # temporary put the event as ophand event
+                else:
+                    prev_event = event # use this to look for the onset event
+            else: # if the pitch is different, and put current and previous event to the ophand event list
+                # raise warning
+                message.append(f'The offset event has a different pitch than the onset event @ {idx}')
+                ophand_events.append(event)
+                ophand_events.append(prev_event)
+                # reset prev_event
+                prev_event = [-1, -1, -1, -1]
+        else:
+            message.append(f'Error: two consecutive events @ {idx}\n{event=}, {prev_event=}')
+            ophand_events.append(event)
+            ophand_events.append(prev_event)
+            # reset prev_event
+            prev_event = [-1, -1, -1, -1]
+
+
+    if verbose:
+        print(message)
+
+    note_sequences.assign_instruments(note_output)
+    note_sequences.validate_note_sequence(note_output)
+    note_seq.note_sequence_to_midi_file(note_output, output_filename)
+    return note_output, ophand_events

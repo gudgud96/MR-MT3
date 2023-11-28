@@ -235,14 +235,16 @@ def encode_and_index_events_new(
       state_event_indices: Corresponding state event index for every audio frame.
     """
     indices = np.argsort(event_times, kind='stable') # sort by time
-    event_steps = np.array([round(event_times[i] * codec.steps_per_second)
+    event_steps = np.array([round(event_times[i] * 125)
                    for i in indices]) # convert time to frame number
+    event_times = np.array([event_times[i]
+                   for i in indices])
     event_values = np.array([(event_values[i].pitch,
-                     event_values[i].program,
+                     event_values[i].program if event_values[i].is_drum is False else 129, # assign program 129 as drum
                      1 if event_values[i].velocity > 0 else 0,
                      ) for i in indices])
 
-    return (event_steps, event_values)
+    return (event_steps, event_times, event_values)
 
 
 def decode_events(

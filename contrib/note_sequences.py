@@ -79,6 +79,8 @@ def assign_instruments(ns: note_seq.NoteSequence) -> None:
         else:
             note.instrument = program_instruments[note.program]
 
+    print(program_instruments)
+
 
 def validate_note_sequence(ns: note_seq.NoteSequence) -> None:
     """Raise ValueError if NoteSequence contains invalid notes."""
