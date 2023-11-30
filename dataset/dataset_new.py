@@ -188,28 +188,13 @@ class SlakhDataset(Dataset):
         #     # represent them), but preserve original NoteSequence for eval.
         #     ns = note_sequences.trim_overlapping_notes(ns)
 
-        if example_id is not None:
-            ns.id = example_id
-
-        if self.onsets_only:
-            times, values = note_sequences.note_sequence_to_onsets(ns)
-        else:
-            times, values = (
-                note_sequences.note_sequence_to_onsets_and_offsets_and_programs(ns))
-            # print('times', times)
-            # print('values', values)
-
-        (event_steps, event_times, event_values) = (
-            run_length_encoding.encode_and_index_events_new(
-                state=note_sequences.NoteEncodingState() if self.include_ties else None,
-                event_times=times,
-                event_values=values,
-                encode_event_fn=note_sequences.note_event_data_to_events,
-                codec=self.codec,
-                frame_times=frame_times,
-                encoding_state_to_events_fn=(
-                    note_sequences.note_encoding_state_to_events
-                    if self.include_ties else None)))        
+        # make target_seq a numpy
+        # use program = 129 to represent drums
+        target_seq = np.array([
+            [i.pitch,
+            i.program if i.is_drum==False else 129,
+            i.start_time,
+            i.end_time] for i in ns.notes])
 
         # print('events', events)
         # print('inputs', np.array(frames).shape)
@@ -218,11 +203,8 @@ class SlakhDataset(Dataset):
         return {
             'inputs': np.array(frames),
             'input_times': frame_times,
-            'targets': event_values,
-            'target_times': event_times,
-            'global_event_steps': event_steps,
-            # 'sequence': ns.SerializeToString()
-        }    
+            'targets': target_seq,
+        }
 
     def _extract_target_sequence_with_indices(self, features, state_events_end_token=None):
         """Extract target sequence corresponding to audio token segment."""
@@ -387,31 +369,34 @@ class SlakhDataset(Dataset):
         return rows
     
     def _split_frame_new(self, row, length=2000):
-        rows = []
+        splits = []
         input_length = row['inputs'].shape[0]
 
-        # chunk the audio into chunks of `length` = 2000
+        # convert time in seconds into time in frames
+        start_frame = np.round(row['targets'][:, 2] * self.spectrogram_config.frames_per_second)
+        end_frame = np.round(row['targets'][:, 3] * self.spectrogram_config.frames_per_second)
+        # storing two extra info for debugging
+        global_frames = []
+        local_frames = []        
+
+        # chunk the audio into splits of `length` = 2000
         # during _random_chunk, within each chunk, randomly select a segment = self.mel_length
         for split in range(0, input_length, length):
+            new_row = {}
             if split + length >= input_length: # discard the last chunk if it is too short
                 continue
-            new_row = {}
-            for k in row.keys():
-                # obtain a mask to select relevant event from the target
-                seg_mask = (row['global_event_steps'] >= split) & (row['global_event_steps'] < split + length)
-                if k in ['inputs', 'input_times']:
-                    new_row[k] = row[k][split:split+length]
-                elif k in ['targets', 'target_times', 'global_event_steps']:
-                    new_row[k] = row[k][seg_mask]
-                else:
-                    # if the key is not found, raise an error
-                    raise ValueError(f"key {k} not found in row")                    
-            new_row['local_event_steps'] = new_row['global_event_steps'] - split
-            rows.append(new_row)
+
+            start_idx = int(split)
+            end_idx = int(split + length)
+            # creating a mask to find active events within the chunk
+            new_row['inputs'] = row['inputs'][start_idx:end_idx]
+            active_mask = np.bitwise_and((start_frame < end_idx), (end_frame > start_idx))
+            new_row['global_frames'] = np.stack((start_frame, end_frame), axis=1)[active_mask]
+            new_row['local_frames'] = np.stack((start_frame - split, end_frame - split), axis=1)[active_mask]
+            new_row['targets'] = row['targets'][active_mask]
+            splits.append(new_row)
         
-        if len(rows) == 0:
-            return [row]
-        return rows    
+        return splits
     
     def _random_chunk(self, row):
         new_row = {}
@@ -439,17 +424,16 @@ class SlakhDataset(Dataset):
         # start_length = random.randint(0, random_length)
         # TODO: revert back to normal after debugging
         start_length = 0        
-        for k in row.keys():
-            seg_mask = (row['local_event_steps'] >= start_length) & (row['local_event_steps'] < start_length + self.mel_length) 
-            if k in ['inputs', 'input_times']:
-                new_row[k] = row[k][start_length:start_length+self.mel_length]
-            elif k in ['targets', 'target_times', 'global_event_steps', 'local_event_steps']:
-                new_row[k] = torch.tensor(row[k][seg_mask])
-            else:
-                # if the key is not found, raise an error
-                raise ValueError(f"key {k} not found in row")
-            # offset local_event_steps
-        new_row['local_event_steps'] = new_row['local_event_steps'] - start_length
+
+        start_idx = start_length
+        end_idx = start_length + self.mel_length            
+        active_mask = np.bitwise_and((row['local_frames'][:,0] < end_idx), (row['local_frames'][:,1] > start_idx))
+
+        new_row['targets'] = row['targets'][active_mask]
+        new_row['global_frames'] = row['global_frames'][active_mask]
+        new_row['local_frames'] = row['local_frames'][active_mask] - start_length
+        new_row['inputs'] = row['inputs'][start_length:start_length+self.mel_length]
+
         return new_row    
     
     def _to_event(self, predictions_np: List[np.ndarray], frame_times: np.ndarray):
@@ -491,7 +475,8 @@ class SlakhDataset(Dataset):
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
         row = self._tokenize(ns, audio, inst_names)
-        row_new = self._tokenize_new(ns, audio, inst_names) 
+        row_new = self._tokenize_new(ns, audio, inst_names)
+        
         # Example audio 'Track01644'
         # full inputs (40522, 128)
         # 'input_event_start_indices' (40522)
@@ -505,7 +490,7 @@ class SlakhDataset(Dataset):
         # if we need to ensure that the chunks in `rows` to be contiguous, use:
         # rows = self._split_frame(row, length=self.mel_length)
         rows = self._split_frame(row)
-        rows_new = self._split_frame_new(row_new)
+        splits = self._split_frame_new(row_new)
         # a list of len 20 containing audio segs (2000, 128)
         # 'input_event_start_indices' (2000)
         # still full targets (62963), copied 20 times
@@ -515,15 +500,16 @@ class SlakhDataset(Dataset):
 
         
         inputs, targets, frame_times, num_insts = [], [], [], []
-        inputs_new, targets_new, frame_times_new, num_insts_new, local_frames = [], [], [], [], []
+        new_wavs, new_targets, new_local_frames = [], [], []
         if len(rows) > self.num_rows_per_batch:
             start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
+            start_idx = 0 # TODO: revert back to normal after debugging
             rows = rows[start_idx : start_idx + self.num_rows_per_batch]
-        
+            splits = splits[start_idx : start_idx + self.num_rows_per_batch]
         predictions = []
         wavs = []
         fake_start = None
-        for j, (row, row_new) in enumerate(zip(rows, rows_new)):
+        for j, (row, row_new) in enumerate(zip(rows, splits)):
             row = self._random_chunk(row)
             row_new = self._random_chunk_new(row_new)
             # when j=0
@@ -543,6 +529,7 @@ class SlakhDataset(Dataset):
             # e.g. [1131, 1, 1, 1, 1212] => [1131, 3, 1212]
 
             wavs.append(row["inputs"].reshape(-1,))
+            new_wavs.append(row_new["inputs"].reshape(-1,))
             # sf.write(f"test_{j}.wav", row["inputs"].reshape(-1,), 16000, "PCM_24")
 
             row = self._compute_spectrogram(row)
@@ -567,13 +554,12 @@ class SlakhDataset(Dataset):
             print(f"")
             row = self._pad_length(row) # remove appending for better visualization
             for i, event in enumerate(row_new["targets"]):
-                print(f"{row_new['target_times'][i]} <time_{row_new['local_event_steps'][i]}, program_{event[1]}, pitch_{event[0]}, vel_{event[2]}>")
+                print(f"{event[2]} <time_{row_new['local_frames'][i][0]}, program_{event[1]}, pitch_{event[0]}>")
             # row_new = self._pad_length_targets(row_new) # new this to create negative samples
             inputs.append(row["inputs"])
             targets.append(row["targets"])
-            inputs_new.append(row_new["inputs"])
-            targets_new.append(row_new["targets"])
-            local_frames.append(row_new['local_event_steps'] +  j*256) # one chunk = 256 frames
+            new_targets.append(row_new["targets"])
+            new_local_frames.append(row_new['local_frames'] +  j*256) # one chunk = 256 frames
 
             # ========== for reconstructing the MIDI from MT3 events =========== #
             result = row["targets"]
@@ -605,13 +591,45 @@ class SlakhDataset(Dataset):
              # ========== End of reconstructing the MIDI from events =========== #
 
         # ===== Decoding the new tokens back to MIDI =======
-        total_targets_new = torch.vstack([targets_new[i] for i in range(len(targets_new))]) # combining different chunks
-        total_local_frames = torch.vstack([local_frames[i].unsqueeze(1) for i in range(len(local_frames))]) # combining different chunks
-        total_events = torch.cat(
-            (total_targets_new, total_local_frames),
-            dim=1) # combining events and time steps
-        total_events = sorted(total_events, key=lambda note: (note[0], note[1])) # sorting according to pitch and program
-        note_output, ophand_events = pred2midi2(total_events, output_filename=f"{filename}_new_decoded.mid")
+        complete_sequence = np.vstack(i for i in new_targets)
+        # we can remove duplicated notes by using np.unique
+        complete_sequence_unique = np.unique(complete_sequence, axis=0)
+        print(f"Number of duplicated events removed: {len(complete_sequence_unique) - len(complete_sequence)}")        
+
+        note_output = note_seq.NoteSequence(ticks_per_quarter=220)
+        for event in complete_sequence_unique:
+            note_output.notes.add(
+                pitch=int(event[0]),
+                start_time=event[2],
+                end_time=event[3],
+                velocity=80,
+                program=int(event[1]) if event[1]!=129 else 0,
+                is_drum=True if event[1]==129 else False,
+                ) 
+            
+        note_sequences.assign_instruments(note_output)
+        note_sequences.validate_note_sequence(note_output)
+        # everything seems okay
+        note_seq.note_sequence_to_midi_file(note_output, 'decode_after_randomchunk_realtime.mid')
+
+        # reconstruct using local frames
+        complete_sequence = np.vstack(np.concatenate((i[:,:2], j[:]/self.spectrogram_config.frames_per_second), axis=1) for i,j in zip(new_targets, new_local_frames))        
+        complete_sequence_unique = np.unique(complete_sequence, axis=0)
+        note_output = note_seq.NoteSequence(ticks_per_quarter=220)
+        for event in complete_sequence_unique:
+            note_output.notes.add(
+                pitch=int(event[0]),
+                start_time=event[2],
+                end_time=event[3] if event[1]!=129 else event[2] + 0.01,
+                velocity=80,
+                program=int(event[1]) if event[1]!=129 else 0,
+                is_drum=True if event[1]==129 else False,
+                ) 
+            
+        note_sequences.assign_instruments(note_output)
+        note_sequences.validate_note_sequence(note_output)
+        # everything seems okay
+        note_seq.note_sequence_to_midi_file(note_output, 'decode_after_randomchunk_frametime.mid')
         # ========== for reconstructing the MIDI from MT3 events =========== #
         encoding_spec = note_sequences.NoteEncodingWithTiesSpec
         result = metrics_utils.event_predictions_to_ns(
