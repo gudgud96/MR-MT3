@@ -1,0 +1,56 @@
+num_epochs: 800
+devices: 1
+mode: "train"
+model_type: ${hydra:runtime.choices.model} # parse the filename of the config
+dataset_type: ${hydra:runtime.choices.dataset}
+seed: 365
+path:
+
+event_length: 256
+mel_length: 256
+num_rows_per_batch: 12
+
+optim:
+  lr: 2e-4
+  warmup_steps: 64500
+  num_epochs: ${num_epochs}
+  num_steps_per_epoch: # keep it empty since it will be parsed inside train.py  
+  min_lr: 1e-4
+
+grad_accum: 1
+
+dataloader:
+  train:
+    batch_size: 1
+    num_workers: 12
+  val:
+    batch_size: 1
+    num_workers: 12  
+
+modelcheckpoint:
+  monitor: 'val_loss'
+  mode: 'min'
+  save_last: True
+  save_top_k: 5
+  save_weights_only: False
+  filename: '{epoch}-{step}-{val_loss:.4f}'
+
+trainer:
+  precision: 32
+  max_epochs: ${num_epochs}
+  accelerator: 'gpu'
+  accumulate_grad_batches: ${grad_accum}
+  num_sanity_val_steps: 2
+  log_every_n_steps: 100
+  strategy: "ddp_find_unused_parameters_true"
+  devices: ${devices}
+
+eval:
+  is_sanity_check: False
+  eval_dataset:
+  exp_tag_name: 
+  audio_dir:  
+
+defaults:
+  - model: DETR
+  - dataset: SlakhNew

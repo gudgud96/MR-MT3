@@ -52,6 +52,7 @@ class SlakhDataset(Dataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
         self.num_rows_per_batch = num_rows_per_batch
+        self.drum_program = 128 # 0-127 are instruments
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
@@ -189,10 +190,10 @@ class SlakhDataset(Dataset):
         #     ns = note_sequences.trim_overlapping_notes(ns)
 
         # make target_seq a numpy
-        # use program = 129 to represent drums
+        # use program = 128 to represent drums
         target_seq = np.array([
             [i.pitch,
-            i.program if i.is_drum==False else 129,
+            i.program if i.is_drum==False else self.drum_program,
             i.start_time,
             i.end_time] for i in ns.notes])
 
@@ -554,7 +555,7 @@ class SlakhDataset(Dataset):
         # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
 
 
-        return torch.stack(inputs), torch.stack(targets)
+        return torch.stack(inputs), torch.stack(targets).long()
     
     def __len__(self):
         return len(self.df)
@@ -593,42 +594,6 @@ class SlakhDataset(Dataset):
         
         res += token_lst[shift_idx[-1]:]
         return res
-    
-    def get_token_name(self, token_idx):
-        token_idx = int(token_idx)
-        if token_idx >= 1001 and token_idx <= 1128:
-            token = f"pitch_{token_idx - 1001}"
-        elif token_idx >= 1129 and token_idx <= 1130:
-            token = f"velocity_{token_idx - 1129}"
-        elif token_idx >= 1131 and token_idx <= 1131:
-            token = "tie"
-        elif token_idx >= 1132 and token_idx <= 1259:
-            token = f"program_{token_idx - 1132}"
-        elif token_idx >= 1260 and token_idx <= 1387:
-            token = f"drum_{token_idx - 1260}"
-        elif token_idx >= 0 and token_idx < 1000:
-            token = f"shift_{token_idx}"
-        else:
-            token = f"invalid_{token_idx}"
-        
-        return token
-    
-    def token_to_idx(self, token_str):
-        if "pitch" in token_str:
-            token_idx = int(token_str.split("_")[1]) + 1001
-        elif "velocity" in token_str:
-            token_idx = int(token_str.split("_")[1]) + 1129
-        elif "tie" in token_str:
-            token_idx = 1131
-        elif "program" in token_str:
-            token_idx = int(token_str.split("_")[1]) + 1132
-        elif "drum" in token_str:
-            token_idx = int(token_str.split("_")[1]) + 1260
-        elif "shift" in token_str:
-            token_idx = int(token_str.split("_")[1])
-
-        return token_idx
-
 
 def collate_fn(lst):
     inputs = torch.cat([k[0] for k in lst])
@@ -683,7 +648,7 @@ def pred2midi2(events, output_filename='new_token_decoded.mid', verbose=False):
         message = []
         event = event.tolist()
         state = event[2]        
-        if event[1]==129: # when the current event is a drum
+        if event[1]==128: # when the current event is a drum (program 128)
             note_output.notes.add(
                 pitch=int(event[0]),
                 start_time= event[3] / step2time_factor,
@@ -694,7 +659,7 @@ def pred2midi2(events, output_filename='new_token_decoded.mid', verbose=False):
                 instrument=0
                 )
             # the drum event is comppleted, no need to save the event        
-        elif state == 1 and prev_event[2]!=state and event[1]!=129: # when the current event is an onset
+        elif state == 1 and prev_event[2]!=state and event[1]!=self.drum_program: # when the current event is an onset
             onset_time = event[3] / step2time_factor # TODO: don't use hard-coded value
             prev_event = event # use this to look for the offset event
         elif state == 0 and prev_event[2]!=state: # when the current event is an offset
