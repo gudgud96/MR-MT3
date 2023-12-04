@@ -58,16 +58,22 @@ class DETR(pl.LightningModule):
                 lm_logits[3].flatten(0,1), targets[:,:,3].flatten(0,1)
             )
         total_loss = pitch_loss + program_loss + start_loss #+ end_loss               
-        self.log('train_pitch_loss', pitch_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log('train_program_loss', program_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log('train_start_loss', start_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log('train_end_loss', end_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log('train_loss', total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('train/pitch_loss', pitch_loss, prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('train/program_loss', program_loss, prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('train/onset_loss', start_loss, prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('train/offset_loss', end_loss, prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('train/loss', total_loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
 
         if batch_idx == 0:
             if self.current_epoch == 0:
                 self._log_text(targets, "train/targets", max_sentences=4, logger=self)
-            # self._log_text(lm_logits.argmax(-1), "val/preds", max_sentences=4, logger=self)
+            # get top1 predictions out of the lm_logits tuples
+            pitch_preds = lm_logits[0].argmax(-1)
+            program_preds = lm_logits[1].argmax(-1)
+            onset_preds = lm_logits[2].argmax(-1)
+            offset_preds = lm_logits[3].argmax(-1)
+            pred = torch.stack((pitch_preds, program_preds, onset_preds, offset_preds), dim=2)
+            self._log_text(pred, "train/preds", max_sentences=4, logger=self)
         return total_loss
 
     @torch.no_grad()
@@ -110,17 +116,21 @@ class DETR(pl.LightningModule):
 
 
         total_loss = pitch_loss + program_loss + start_loss #+ end_loss               
-        self.log('val_pitch_loss', pitch_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log('val_program_loss', program_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log('val_start_loss', start_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log('val_end_loss', end_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log('val_loss', total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/pitch_loss', pitch_loss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/program_loss', program_loss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/onset_loss', start_loss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/offset_loss', end_loss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/loss', total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
 
         if batch_idx == 0:
             if self.current_epoch == 0:
                 self._log_text(targets, "val/targets", max_sentences=4, logger=self)
-            # self._log_text(lm_logits.argmax(-1), "val/preds", max_sentences=4, logger=self)
-        
+            pitch_preds = lm_logits[0].argmax(-1)
+            program_preds = lm_logits[1].argmax(-1)
+            onset_preds = lm_logits[2].argmax(-1)
+            offset_preds = lm_logits[3].argmax(-1)
+            pred = torch.stack((pitch_preds, program_preds, onset_preds, offset_preds), dim=2)
+            self._log_text(pred, "val/preds", max_sentences=4, logger=self)
         # no need to use it in this stage
         # return loss
 
@@ -150,7 +160,12 @@ class DETR(pl.LightningModule):
             if idx < max_sentences: 
                 token_str = ''
                 for token in token_seq:
-                    token_str = token_str + f"<{token}>" + ', '
+                    pitch = token[0].item()
+                    program = token[1].item()
+                    onset = token[2].item()
+                    offset = token[3].item()
+                    token_str = token_str + \
+                    f"<{pitch}, {program}, {onset}, {offset}>" + ', '
                 plugin_list.append(token_str)        
         s = pd.Series(plugin_list, name="token sequence")
         logger.logger.experiment.add_text(tag, s.to_markdown(), global_step=self.global_step)
