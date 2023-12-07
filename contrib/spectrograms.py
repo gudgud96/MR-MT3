@@ -40,6 +40,7 @@ class SpectrogramConfig:
     sample_rate: int = DEFAULT_SAMPLE_RATE
     hop_width: int = DEFAULT_HOP_WIDTH
     num_mel_bins: int = DEFAULT_NUM_MEL_BINS
+    use_tf_spectral_ops: bool = False
 
     @property
     def abbrev_str(self):
@@ -76,14 +77,13 @@ def split_audio(samples, spectrogram_config):
 def compute_spectrogram(
     samples, 
     spectrogram_config,
-    use_tf_spectral_ops=False,
 ):
     """
     Compute a mel spectrogram.
     Due to multiprocessing issues running TF and PyTorch together, we use librosa
     and only keep `spectral_ops.compute_logmel` for evaluation purposes.
     """
-    if use_tf_spectral_ops:
+    if spectrogram_config.use_tf_spectral_ops:
         # NOTE: we only keep this for evaluating existing models
         # This is because I find even with an equivalent PyTorch / librosa implementation 
         # that gives close-enough results (melspec MAE ~ 2e-3), the model output is still affected badly.

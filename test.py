@@ -21,6 +21,7 @@ def get_scores(
     ground_truth_midi_dir=None,
     verbose=True,
     contiguous_inference=False,
+    use_tf_spectral_ops=False,
     batch_size=8,
     max_length=1024
 ):  
@@ -28,7 +29,8 @@ def get_scores(
         model=model,
         device=torch.device('cuda'),
         mel_norm=mel_norm,
-        contiguous_inference=contiguous_inference
+        contiguous_inference=contiguous_inference,
+        use_tf_spectral_ops=use_tf_spectral_ops
     )
 
     def func(fname):
@@ -100,6 +102,7 @@ def main(cfg):
     else:
         # load weights for nn.Module
         model = pl.model
+        # print(model)
         model.load_state_dict(torch.load(cfg.path))
 
     model.eval()
@@ -124,6 +127,7 @@ def main(cfg):
         exp_tag_name=cfg.eval.exp_tag_name,
         ground_truth_midi_dir=ground_truth_midi_dir,
         contiguous_inference=cfg.eval.contiguous_inference,
+        use_tf_spectral_ops=cfg.eval.use_tf_spectral_ops,
         batch_size=cfg.eval.batch_size,
     )
 
