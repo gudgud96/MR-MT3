@@ -21,9 +21,7 @@ from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, TypeVar
 
 from contrib import event_codec, note_sequences, run_length_encoding
 
-import note_seq
 import numpy as np
-import pretty_midi
 
 S = TypeVar('S')
 T = TypeVar('T')
@@ -144,56 +142,3 @@ def event_predictions_to_ns(
         'est_invalid_events': total_invalid_events,
         'est_dropped_events': total_dropped_events,
     }
-
-
-def get_prettymidi_pianoroll(ns: note_seq.NoteSequence, fps: float,
-                             is_drum: bool):
-    """Convert NoteSequence to pianoroll through pretty_midi."""
-    for note in ns.notes:
-        if is_drum or note.end_time - note.start_time < 0.05:
-            # Give all drum notes a fixed length, and all others a min length
-            note.end_time = note.start_time + 0.05
-
-    pm = note_seq.note_sequence_to_pretty_midi(ns)
-    end_time = pm.get_end_time()
-    cc = [
-        # all sound off
-        pretty_midi.ControlChange(number=120, value=0, time=end_time),
-        # all notes off
-        pretty_midi.ControlChange(number=123, value=0, time=end_time)
-    ]
-    pm.instruments[0].control_changes = cc
-    if is_drum:
-        # If inst.is_drum is set, pretty_midi will return an all zero pianoroll.
-        for inst in pm.instruments:
-            inst.is_drum = False
-    pianoroll = pm.get_piano_roll(fs=fps)
-    return pianoroll
-
-
-def frame_metrics(ref_pianoroll: np.ndarray,
-                  est_pianoroll: np.ndarray,
-                  velocity_threshold: int) -> Tuple[float, float, float]:
-    """Frame Precision, Recall, and F1."""
-    import sklearn
-    # Pad to same length
-    if ref_pianoroll.shape[1] > est_pianoroll.shape[1]:
-        diff = ref_pianoroll.shape[1] - est_pianoroll.shape[1]
-        est_pianoroll = np.pad(
-            est_pianoroll, [(0, 0), (0, diff)], mode='constant')
-    elif est_pianoroll.shape[1] > ref_pianoroll.shape[1]:
-        diff = est_pianoroll.shape[1] - ref_pianoroll.shape[1]
-        ref_pianoroll = np.pad(
-            ref_pianoroll, [(0, 0), (0, diff)], mode='constant')
-
-    # For ref, remove any notes that are too quiet (consistent with Cerberus.)
-    ref_frames_bool = ref_pianoroll > velocity_threshold
-    # For est, keep all predicted notes.
-    est_frames_bool = est_pianoroll > 0
-
-    precision, recall, f1, _ = sklearn.metrics.precision_recall_fscore_support(
-        ref_frames_bool.flatten(),
-        est_frames_bool.flatten(),
-        labels=[True, False])
-
-    return precision[0], recall[0], f1[0]

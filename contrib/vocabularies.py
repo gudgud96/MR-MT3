@@ -23,7 +23,6 @@ from contrib import event_codec
 import note_seq
 import seqio
 import t5.data
-import tensorflow as tf
 
 
 DECODED_EOS_ID = -1
@@ -220,7 +219,7 @@ class GenericTokenVocabulary(seqio.Vocabulary):
     ids = [_decode_id(int(i)) for i in ids]
     return ids
 
-  def _encode_tf(self, token_ids: tf.Tensor) -> tf.Tensor:
+  def _encode_tf(self, token_ids):
     """Encode a list of tokens to a tf.Tensor.
 
     Args:
@@ -229,46 +228,48 @@ class GenericTokenVocabulary(seqio.Vocabulary):
     Returns:
       a 1d tf.Tensor with dtype tf.int32
     """
-    with tf.control_dependencies(
-        [tf.debugging.assert_less(
-            token_ids, tf.cast(self._num_regular_tokens, token_ids.dtype)),
-         tf.debugging.assert_greater_equal(
-             token_ids, tf.cast(0, token_ids.dtype))
-         ]):
-      tf_ids = token_ids + self._num_special_tokens
-    return tf_ids
+    return None
+    # with tf.control_dependencies(
+    #     [tf.debugging.assert_less(
+    #         token_ids, tf.cast(self._num_regular_tokens, token_ids.dtype)),
+    #      tf.debugging.assert_greater_equal(
+    #          token_ids, tf.cast(0, token_ids.dtype))
+    #      ]):
+    #   tf_ids = token_ids + self._num_special_tokens
+    # return tf_ids
 
-  def _decode_tf(self, ids: tf.Tensor) -> tf.Tensor:
-    """Decode in TensorFlow.
+  def _decode_tf(self, ids):
+    return None
+  #   """Decode in TensorFlow.
 
-    The special tokens of PAD and UNK as well as extra_ids will be
-    replaced with DECODED_INVALID_ID in the output. If EOS is present, it and
-    all following tokens in the decoded output and will be represented by
-    DECODED_EOS_ID.
+  #   The special tokens of PAD and UNK as well as extra_ids will be
+  #   replaced with DECODED_INVALID_ID in the output. If EOS is present, it and
+  #   all following tokens in the decoded output and will be represented by
+  #   DECODED_EOS_ID.
 
-    Args:
-      ids: a 1d tf.Tensor with dtype tf.int32
+  #   Args:
+  #     ids: a 1d tf.Tensor with dtype tf.int32
 
-    Returns:
-      a 1d tf.Tensor with dtype tf.int32
-    """
-    # Create a mask that is true from the first EOS position onward.
-    # First, create an array that is True whenever there is an EOS, then cumsum
-    # that array so that every position after and including the first True is
-    # >1, then cast back to bool for the final mask.
-    eos_and_after = tf.cumsum(
-        tf.cast(tf.equal(ids, self.eos_id), tf.int32), exclusive=False, axis=-1)
-    eos_and_after = tf.cast(eos_and_after, tf.bool)
+  #   Returns:
+  #     a 1d tf.Tensor with dtype tf.int32
+  #   """
+  #   # Create a mask that is true from the first EOS position onward.
+  #   # First, create an array that is True whenever there is an EOS, then cumsum
+  #   # that array so that every position after and including the first True is
+  #   # >1, then cast back to bool for the final mask.
+  #   eos_and_after = tf.cumsum(
+  #       tf.cast(tf.equal(ids, self.eos_id), tf.int32), exclusive=False, axis=-1)
+  #   eos_and_after = tf.cast(eos_and_after, tf.bool)
 
-    return tf.where(
-        eos_and_after,
-        DECODED_EOS_ID,
-        tf.where(
-            tf.logical_and(
-                tf.greater_equal(ids, self._num_special_tokens),
-                tf.less(ids, self._base_vocab_size)),
-            ids - self._num_special_tokens,
-            DECODED_INVALID_ID))
+  #   return tf.where(
+  #       eos_and_after,
+  #       DECODED_EOS_ID,
+  #       tf.where(
+  #           tf.logical_and(
+  #               tf.greater_equal(ids, self._num_special_tokens),
+  #               tf.less(ids, self._base_vocab_size)),
+  #           ids - self._num_special_tokens,
+  #           DECODED_INVALID_ID))
   
   def num_special_tokens(self):
         return self._num_special_tokens

@@ -15,9 +15,14 @@
 """Audio spectrogram functions."""
 
 import dataclasses
+import torch
+from torchaudio.transforms import MelSpectrogram
+import librosa
+import numpy as np
 
-from ddsp import spectral_ops
-import tensorflow as tf
+# this is to suppress a warning from torch melspectrogram
+import warnings
+warnings.filterwarnings("ignore")
 
 # defaults for spectrogram config
 DEFAULT_SAMPLE_RATE = 16000
@@ -35,6 +40,7 @@ class SpectrogramConfig:
     sample_rate: int = DEFAULT_SAMPLE_RATE
     hop_width: int = DEFAULT_HOP_WIDTH
     num_mel_bins: int = DEFAULT_NUM_MEL_BINS
+    use_tf_spectral_ops: bool = False
 
     @property
     def abbrev_str(self):
@@ -53,29 +59,63 @@ class SpectrogramConfig:
 
 
 def split_audio(samples, spectrogram_config):
-    """Split audio into frames."""
-    return tf.signal.frame(
+    """Split audio into frames using librosa."""
+    if samples.shape[0] % spectrogram_config.hop_width != 0:
+        samples = np.pad(
+            samples, 
+            (0, spectrogram_config.hop_width - samples.shape[0] % spectrogram_config.hop_width), 
+            'constant',
+            constant_values=0
+        )
+    return librosa.util.frame(
         samples,
         frame_length=spectrogram_config.hop_width,
-        frame_step=spectrogram_config.hop_width,
-        pad_end=True)
+        hop_length=spectrogram_config.hop_width,
+        axis=-1).T
 
 
-def compute_spectrogram(samples, spectrogram_config):
-    """Compute a mel spectrogram."""
-    overlap = 1 - (spectrogram_config.hop_width / FFT_SIZE)
-    return spectral_ops.compute_logmel(
-        samples,
-        bins=spectrogram_config.num_mel_bins,
-        lo_hz=MEL_LO_HZ,
-        overlap=overlap,
-        fft_size=FFT_SIZE,
-        sample_rate=spectrogram_config.sample_rate)
+def compute_spectrogram(
+    samples, 
+    spectrogram_config,
+):
+    """
+    Compute a mel spectrogram.
+    Due to multiprocessing issues running TF and PyTorch together, we use librosa
+    and only keep `spectral_ops.compute_logmel` for evaluation purposes.
+    """
+    if spectrogram_config.use_tf_spectral_ops:
+        # NOTE: we only keep this for evaluating existing models
+        # This is because I find even with an equivalent PyTorch / librosa implementation 
+        # that gives close-enough results (melspec MAE ~ 2e-3), the model output is still affected badly.
+        # lazy load
+        from ddsp import spectral_ops
+        overlap = 1 - (spectrogram_config.hop_width / FFT_SIZE)
+        return spectral_ops.compute_logmel(
+            samples,
+            bins=spectrogram_config.num_mel_bins,
+            lo_hz=MEL_LO_HZ,
+            overlap=overlap,
+            fft_size=FFT_SIZE,
+            sample_rate=spectrogram_config.sample_rate)
+    else:
+        transform = MelSpectrogram(
+            sample_rate=spectrogram_config.sample_rate,
+            n_fft=FFT_SIZE,
+            hop_length=spectrogram_config.hop_width,
+            n_mels=spectrogram_config.num_mel_bins,
+            f_min=MEL_LO_HZ,
+            power=1.0,
+        )
+        samples = torch.from_numpy(samples).float()
+        S = transform(samples)
+        S[S<0] = 0
+        S = torch.log(S + 1e-6)
+        return S.numpy().T
 
 
 def flatten_frames(frames):
     """Convert frames back into a flat array of samples."""
-    return tf.reshape(frames, [-1])
+    return np.reshape(frames, (-1,))
 
 
 def input_depth(spectrogram_config):
