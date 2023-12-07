@@ -9,6 +9,10 @@ path:
 event_length: 1024
 mel_length: 256
 num_rows_per_batch: 12
+split_frame_length: 256
+dataset_is_deterministic: False
+dataset_is_randomize_tokens: True
+dataset_use_tf_spectral_ops: False
 
 optim:
   lr: 2e-4
@@ -33,6 +37,7 @@ modelcheckpoint:
   save_last: True
   save_top_k: 5
   save_weights_only: False
+  every_n_epochs: 50
   filename: '{epoch}-{step}-{val_loss:.4f}'
 
 trainer:
@@ -57,6 +62,7 @@ eval:
   midi_dir:
   contiguous_inference:
   batch_size: 8
+  use_tf_spectral_ops: False    # change this to True if using pretrained/mt3.pth
 
 defaults:
   - model: MT3Net

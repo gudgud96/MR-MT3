@@ -30,10 +30,15 @@ class SlakhDataset(Dataset):
         midi_folder='MIDI', 
         inst_filename='inst_names.json',
         shuffle=True,
-        num_rows_per_batch=8
+        num_rows_per_batch=8,
+        split_frame_length=2000,
+        is_randomize_tokens=True,
+        is_deterministic=False,
+        use_tf_spectral_ops=True
     ) -> None:
         super().__init__()
         self.spectrogram_config = spectrograms.SpectrogramConfig()
+        self.spectrogram_config.use_tf_spectral_ops = use_tf_spectral_ops
         self.codec = vocabularies.build_codec(vocab_config=vocabularies.VocabularyConfig(
             num_velocity_bins=1))
         self.vocab = vocabularies.vocabulary_from_codec(self.codec)
@@ -49,6 +54,9 @@ class SlakhDataset(Dataset):
         self.onsets_only = onsets_only
         self.tie_token = self.codec.encode_event(event_codec.Event('tie', 0)) if self.include_ties else None
         self.num_rows_per_batch = num_rows_per_batch
+        self.split_frame_length = split_frame_length
+        self.is_deterministic = is_deterministic
+        self.is_randomize_tokens = is_randomize_tokens
 
     def _build_dataset(self, root_dir, shuffle=True):
         df = []
@@ -210,14 +218,15 @@ class SlakhDataset(Dataset):
 
                 # NOTE: this needs to be uncommented if not using random-order augmentation
                 # because random-order augmentation use `_remove_redundant_tokens` to replace this part
-                # is_redundant = False
-                # for i, (min_index, max_index) in enumerate(state_change_event_ranges):
-                #     if (min_index <= event) and (event <= max_index):
-                #         if current_state[i] == event:
-                #             is_redundant = True
-                #         current_state[i] = event
-                # if is_redundant:
-                #     continue
+                if not self.is_randomize_tokens:
+                    is_redundant = False
+                    for i, (min_index, max_index) in enumerate(state_change_event_ranges):
+                        if (min_index <= event) and (event <= max_index):
+                            if current_state[i] == event:
+                                is_redundant = True
+                            current_state[i] = event
+                    if is_redundant:
+                        continue
 
                 # Once we've reached a non-shift event, RLE all previous shift events
                 # before outputting the non-shift event.
@@ -316,7 +325,10 @@ class SlakhDataset(Dataset):
         random_length = input_length - self.mel_length
         if random_length < 1:
             return row
-        start_length = random.randint(0, random_length)
+        if self.is_deterministic:
+            start_length = 16
+        else:
+            start_length = random.randint(0, random_length)
         for k in row.keys():
             if k in ['inputs', 'input_times', 'input_event_start_indices', 'input_event_end_indices', 'input_state_event_indices']:
                 new_row[k] = row[k][start_length:start_length+self.mel_length]
@@ -355,23 +367,33 @@ class SlakhDataset(Dataset):
         result = result.cpu().numpy()
         return result
     
-    def __getitem__(self, idx):
-        row = self.df[idx]
+    def _preprocess_inputs(self, row):
         ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
         audio, sr = librosa.load(row['audio_path'], sr=None)
         if sr != self.spectrogram_config.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
+        
+        return ns, audio, inst_names
+    
+    def __getitem__(self, idx):
+        ns, audio, inst_names = self._preprocess_inputs(self.df[idx])
+        
         row = self._tokenize(ns, audio, inst_names)
 
         # NOTE: by default, this is self._split_frame(row, length=2000)
         # this does not guarantee the chunks in `rows` to be contiguous.
         # if we need to ensure that the chunks in `rows` to be contiguous, use:
-        # rows = self._split_frame(row, length=self.mel_length)
-        rows = self._split_frame(row)
+        rows = self._split_frame(row, length=self.split_frame_length)
+        # rows = self._split_frame(row)
+
+        # print('self.is_deterministic', self.is_deterministic)
         
         inputs, targets, frame_times, num_insts = [], [], [], []
         if len(rows) > self.num_rows_per_batch:
-            start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
+            if self.is_deterministic:
+                start_idx = 2
+            else:
+                start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
             rows = rows[start_idx : start_idx + self.num_rows_per_batch]
         
         predictions = []
@@ -388,13 +410,13 @@ class SlakhDataset(Dataset):
             row = self._compute_spectrogram(row)
 
             # -- random order augmentation --
-            # If turned on, comment out `is_redundant` code in `run_length_encoding`
-            # print("=======")
+            if self.is_randomize_tokens:
+                t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
+                t = np.array([self.token_to_idx(k) for k in t])
+                t = self._remove_redundant_tokens(t)
+                row["targets"] = t
+            
             # print(j, [self.get_token_name(t) for t in row["targets"]])
-            t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
-            t = np.array([self.token_to_idx(k) for k in t])
-            t = self._remove_redundant_tokens(t)
-            row["targets"] = t
             
             row = self._pad_length(row)
             inputs.append(row["inputs"])
@@ -436,7 +458,6 @@ class SlakhDataset(Dataset):
         # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
         # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
         # ========== for reconstructing the MIDI from events =========== #  
-        # num_insts = np.stack(num_insts)
 
         return torch.stack(inputs), torch.stack(targets)
     
@@ -535,7 +556,10 @@ if __name__ == '__main__':
         shuffle=False,
         is_train=False,
         include_ties=True,
-        mel_length=256
+        mel_length=256,
+        split_frame_length=256,
+        is_deterministic=False,
+        is_randomize_tokens=False
     )
     print("pitch", dataset.codec.event_type_range("pitch"))
     print("velocity", dataset.codec.event_type_range("velocity"))
@@ -545,6 +569,6 @@ if __name__ == '__main__':
     dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
     for idx, item in enumerate(dl):
         inputs, targets = item
-        print(idx, inputs.shape, targets[0])
+        print(idx, inputs.shape, targets[0][:100])
         break
     
