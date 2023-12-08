@@ -121,7 +121,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
                 decoder_head_mask = head_mask
         if inputs is not None:
             inputs_embeds = self.proj(inputs)
-
+        # print('inputs_embeds', inputs_embeds[0][0][:20])
         # Encode if needed (training, first prediction pass)
         if encoder_outputs is None:
             # Convert encoder inputs in embeddings if needed
@@ -144,6 +144,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             )
 
         hidden_states = encoder_outputs[0]
+        # print('hidden_states', hidden_states[0][0][:20])
 
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
             # get decoder inputs from shifting lm labels to the right
@@ -173,6 +174,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             sequence_output = sequence_output * (self.model_dim**-0.5)
         
         lm_logits = self.lm_head(sequence_output)
+        # print('lm_logits', lm_logits[0][0][:20])
 
         # mean_hidden_states = self.mean_pool(sequence_output.transpose(1, 2)).squeeze(-1)
         # inst_cls_logits = self.num_inst_cls(mean_hidden_states)
@@ -600,6 +602,7 @@ class T5Stack(T5PreTrainedModel):
                 seq=inputs_embeds.shape[1], offset=past_key_values_length)
         inputs_embeds = inputs_embeds + tmp
 
+        torch.manual_seed(365)
         hidden_states = self.dropout(inputs_embeds)
 
         for i, (layer_module, past_key_value) in enumerate(zip(self.block, past_key_values)):
@@ -654,6 +657,7 @@ class T5Stack(T5PreTrainedModel):
                 layer_outputs = layer_outputs[:1] + (None,) + layer_outputs[1:]
 
             hidden_states, present_key_value_state = layer_outputs[:2]
+            # print("t5stack hidden_states 2", hidden_states[0][0][:20])
 
             # We share the position biases between the layers - the first layer store them
             # layer_outputs = hidden-states, key-value-states (self-attention position bias), (self-attention weights),
@@ -673,6 +677,7 @@ class T5Stack(T5PreTrainedModel):
                         (layer_outputs[5],)
 
         hidden_states = self.final_layer_norm(hidden_states)
+        torch.manual_seed(365)
         hidden_states = self.dropout(hidden_states)
 
         # Add last layer

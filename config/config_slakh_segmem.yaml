@@ -28,7 +28,7 @@ grad_accum: 1
 dataloader:
   train:
     batch_size: 1
-    num_workers: 4
+    num_workers: 2
   val:
     batch_size: 1
     num_workers: 0
@@ -52,6 +52,7 @@ trainer:
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
   check_val_every_n_epoch: 1
+  deterministic: True
 
 eval:
   is_sanity_check: False
@@ -63,8 +64,8 @@ eval:
   audio_dir:
   midi_dir:
   contiguous_inference:
-  use_tf_spectral_ops: False
   batch_size: 8
+  use_tf_spectral_ops: False
 
 defaults:
   - model: MT3Net
