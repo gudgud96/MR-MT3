@@ -74,11 +74,11 @@ class T5DETR(T5PreTrainedModel):
 
         # TODO: make 4 lm_heads for 4 different predictions (pitch, progm, start, end)
         # 128 pitch + 1 not found token = 129
-        # 128 instruments + 1 drum + 1 not found token = 130
+        # 128 instruments + 1 drum + (optional: 1 not found token = 130)
         # number of steps in one segment + 1 not found token
         # number of steps in one segment + 1 not found token
         self.lm_head_pitch = nn.Linear(config.d_model, config.vocab_size_pitch + 1, bias=False)
-        self.lm_head_program = nn.Linear(config.d_model, config.vocab_size_program + 2, bias=False)
+        self.lm_head_program = nn.Linear(config.d_model, config.vocab_size_program + 1, bias=False)
         self.lm_head_onset = nn.Linear(config.d_model, config.vocab_size_onset + 1, bias=False)
         self.lm_head_offset = nn.Linear(config.d_model, config.vocab_size_offset + 1, bias=False)
         # self.mean_pool = nn.AdaptiveAvgPool1d(1)
@@ -661,23 +661,23 @@ class T5StackDETR(T5PreTrainedModel): # Modified from T5Stack to be a DETR decod
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if input_ids is not None and inputs_embeds is not None:
-            err_msg_prefix = "decoder_" if self.is_decoder else ""
-            raise ValueError(
-                f"You cannot specify both {err_msg_prefix}input_ids and {err_msg_prefix}inputs_embeds at the same time"
-            )
-        elif inputs_embeds is not None:
-            # print("t5stack inputs_embeds", self.is_decoder, inputs_embeds.shape)
-            input_shape = inputs_embeds.size()[:-1]
-        elif input_ids is not None:
-            # print("t5stack input_ids", self.is_decoder, input_ids.shape)
-            input_shape = input_ids.size()[:2]
+        # if input_ids is not None and inputs_embeds is not None:
+        #     err_msg_prefix = "decoder_" if self.is_decoder else ""
+        #     raise ValueError(
+        #         f"You cannot specify both {err_msg_prefix}input_ids and {err_msg_prefix}inputs_embeds at the same time"
+        #     )
+        # elif inputs_embeds is not None:
+        #     # print("t5stack inputs_embeds", self.is_decoder, inputs_embeds.shape)
+        #     input_shape = inputs_embeds.size()[:-1]
+        # elif input_ids is not None:
+        #     # print("t5stack input_ids", self.is_decoder, input_ids.shape)
+        #     input_shape = input_ids.size()[:2]
 
         # if inputs_embeds is None:
         #     # print('input_ids', input_ids.shape)
         #     inputs_embeds = self.embed_tokens(input_ids)
 
-        batch_size, seq_length = input_shape[:2]
+        batch_size = encoder_hidden_states.shape[0]
 
         if inputs_embeds is None:
             # input_ids is now trainable DETR queries

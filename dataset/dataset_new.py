@@ -429,9 +429,9 @@ class SlakhDataset(Dataset):
         end_idx = start_length + self.mel_length            
         active_mask = np.bitwise_and((row['local_frames'][:,0] < end_idx), (row['local_frames'][:,1] > start_idx))
 
-        new_row['targets'] = row['targets'][active_mask]
-        new_row['global_frames'] = row['global_frames'][active_mask]
-        new_row['local_frames'] = row['local_frames'][active_mask] - start_length
+        new_row['targets'] = torch.from_numpy(row['targets'][active_mask])
+        new_row['global_frames'] = torch.from_numpy(row['global_frames'][active_mask])
+        new_row['local_frames'] = torch.from_numpy(row['local_frames'][active_mask]) - start_length
         new_row['inputs'] = row['inputs'][start_length:start_length+self.mel_length]
 
         return new_row    
@@ -492,18 +492,27 @@ class SlakhDataset(Dataset):
             # wavs.append(row_new["inputs"].reshape(-1,))
 
             row_new = self._compute_spectrogram(row_new)
-            row_new = self._pad_length_targets(row_new) # new this to create negative samples
+            # row_new = self._pad_length_targets(row_new) # new this to create negative samples
             ## uncomment this to debug the tokens with audio
             # for i, event in enumerate(row_new["targets"]):
             #     print(f"{event[2]} <time_{row_new['local_frames'][i][0]}, program_{event[1]}, pitch_{event[0]}>")
             # debug_local_frames.append(row_new['local_frames'] +  j*256) # one chunk = 256 frames
             # debug_targets.append(row_new['targets'])
 
-            target_in_frames = np.concatenate(
+            # target_dict = {}
+
+            # considering instrument as the class
+            # pitch, onset, offset as the bounding box
+            # target_dict['labels'] = row_new["targets"][:,1]
+            # target_dict['boxes'] =  np.concatenate(
+            #     (row_new["targets"][:,:1], # obtain pitch but keep the dim
+            #     row_new['local_frames']), axis=1) # add back time in frames
+
+            target_in_frames = torch.cat(
                     (row_new["targets"][:,:2], # remove time in seconds
-                     row_new['local_frames']), axis=1) # add back time in frames
+                     row_new['local_frames']), dim=1) # add back time in frames
             
-            targets.append(torch.tensor(target_in_frames))
+            targets.append(target_in_frames.long())
             inputs.append(row_new["inputs"])
 
         ## ================= exporting MIDI and audio ====================
@@ -555,7 +564,7 @@ class SlakhDataset(Dataset):
         # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
 
 
-        return torch.stack(inputs), torch.stack(targets).long()
+        return torch.stack(inputs), targets
     
     def __len__(self):
         return len(self.df)
