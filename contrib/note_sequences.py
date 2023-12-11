@@ -79,14 +79,12 @@ def assign_instruments(ns: note_seq.NoteSequence) -> None:
         else:
             note.instrument = program_instruments[note.program]
 
-    print(program_instruments)
-
-
 def validate_note_sequence(ns: note_seq.NoteSequence) -> None:
     """Raise ValueError if NoteSequence contains invalid notes."""
-    for note in ns.notes:
+    for idx, note in enumerate(ns.notes):
         if note.start_time >= note.end_time:
-            raise ValueError('note has start time >= end time: %f >= %f' %
+            print(f"note event = {note}")
+            raise ValueError(f'@{idx} note has start time >= end time: %f >= %f' %
                              (note.start_time, note.end_time))
         if note.velocity == 0:
             raise ValueError('note has zero velocity')
