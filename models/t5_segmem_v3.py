@@ -17,7 +17,7 @@
 from typing import Optional, Tuple, Union
 from dataclasses import dataclass
 from models.t5_segmem import T5Config, T5SegMem
-from transformers.models.t5.modeling_t5 import Seq2SeqLMOutput, BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions, checkpoint, T5LayerNorm, T5Block
+from transformers.models.t5.modeling_t5 import Seq2SeqLMOutput, BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions, checkpoint, T5LayerNorm, T5Block, T5CrossAttention
 from transformers.utils import logging
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,10 +35,12 @@ class Seq2SeqLMOutputNumInsts(Seq2SeqLMOutput):
     loss_inst: Optional[torch.FloatTensor] = None
 
 
-class T5SegMemV2(T5SegMem):
+class T5SegMemV3(T5SegMem):
     """
-    V2 appends segmem on encoder_outputs and influence via cross attention
-    instead of V1 which directly prepends segmem on decoder_inputs_embeds
+    V3 appends segmem on encoder_outputs and influence via cross attention
+    Also adds an update gate obtained by cross attention between segmem and encoder_outputs
+    The rationale is to use cross attention to calculate a relevance score between segmem (previous token representation)
+    and encoder_outputs (current spectrogram representation). The relevance score is then used as an update gate.
     """
     _keys_to_ignore_on_load_missing = [
         r"encoder\.embed_tokens\.weight",
@@ -60,7 +62,17 @@ class T5SegMemV2(T5SegMem):
             segmem_num_layers=segmem_num_layers,
             segmem_length=segmem_length,
         )
-    
+
+        # add cross attention for update gate
+        update_gate_config = copy.deepcopy(config)
+        update_gate_config.is_decoder = False
+        update_gate_config.use_cache = False
+        update_gate_config.is_encoder_decoder = False
+        self.update_gate_cross_attn = T5CrossAttention(
+            update_gate_config, 
+            has_relative_attention_bias=False
+        )
+
     def get_model_outputs(
         self,
         inputs: Optional[torch.FloatTensor] = None,
@@ -127,14 +139,26 @@ class T5SegMemV2(T5SegMem):
 
         segmem_embeds = self.decoder_embed_tokens(segmem_ids)                               # (b, l, d)
         segmem_embeds_agg = self.segmem_encoder(segmem_embeds)[0]                           # (b, l, d)
-        segmem_embeds_agg = segmem_embeds_agg[:, :self.segmem_length, :]                    # (b, segmem_length, d)
+        segmem_embeds_agg = segmem_embeds_agg[:, :self.segmem_length, :] 
+        print('segmem_embeds_agg before update', segmem_embeds_agg.shape)                   # (b, segmem_length, d)
 
-        # print('hidden_states before', hidden_states.shape)
+        # NOTE: add an update gate obtained by cross attention between segmem and encoder_outputs
+        update_gate = self.update_gate_cross_attn(
+            segmem_embeds_agg,
+            key_value_states=hidden_states,
+            use_cache=False
+        )
+        update_gate = nn.Sigmoid()(update_gate[0])
+        assert update_gate.shape == segmem_embeds_agg
+        segmem_embeds_agg = segmem_embeds_agg * update_gate
+
+        print('segmem_embeds_agg after update', segmem_embeds_agg.shape)
+
         hidden_states = torch.cat([
             hidden_states,
             segmem_embeds_agg, 
         ], dim=1)
-        # print('hidden_states after', hidden_states.shape)
+        print('hidden_states after', hidden_states.shape)
 
         # Decode
         decoder_outputs = self.decoder(

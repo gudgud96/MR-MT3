@@ -15,7 +15,7 @@ class MT3NetSegMemV2(pl.LightningModule):
         self.optim_cfg = optim_cfg
         T5config = T5Config.from_dict(OmegaConf.to_container(self.config))
         self.model: nn.Module = T5SegMemV2(
-            T5config,
+            config=T5config,
             segmem_num_layers=self.config.segmem_num_layers,
             segmem_length=self.config.segmem_length,
         )

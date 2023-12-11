@@ -167,7 +167,7 @@ class T5SegMem(T5ForConditionalGeneration):
         
         return lm_logits, encoder_outputs, decoder_outputs
 
-    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
+    def generate_2(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
         batch_size = inputs.shape[0]
         inputs_embeds = self.proj(inputs)
         encoder_outputs = self.encoder(
@@ -249,7 +249,7 @@ class T5SegMem(T5ForConditionalGeneration):
         # print()
         return outs_lst
 
-    def generate_2(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
+    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
         batch_size = inputs.shape[0]
         inputs_embeds = self.proj(inputs)
         encoder_outputs = self.encoder(

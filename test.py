@@ -10,6 +10,8 @@ import librosa
 import hydra
 import numpy as np
 from evaluate import evaluate_main
+from tasks.mt3_net import MT3Net
+from tasks.mt3_net_segmem import MT3NetSegMem
 
 
 def get_scores(
@@ -93,7 +95,8 @@ def main(cfg):
     print(f"Loading weights from: {cfg.path}")
     if cfg.path.endswith(".ckpt"):
         # load lightning module from checkpoint
-        pl = pl.load_from_checkpoint(
+        model_cls = hydra.utils.get_class(cfg.model._target_) 
+        pl = model_cls.load_from_checkpoint(
             cfg.path,
             config=cfg.model.config,
             optim_cfg=cfg.optim,

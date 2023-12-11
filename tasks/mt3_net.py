@@ -21,9 +21,9 @@ class MT3Net(pl.LightningModule):
     def forward(self, *args, **kwargs):
         return self.model.forward(*args, **kwargs)
     
-    def on_train_batch_start(self, *args, **kwargs):
-        self.model.train()
-        pl.seed_everything(365)
+    # def on_train_batch_start(self, *args, **kwargs):
+    #     self.model.train()
+    #     pl.seed_everything(365)
 
     def training_step(self, batch, batch_idx):
         inputs, targets = batch
