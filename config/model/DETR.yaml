@@ -20,8 +20,8 @@ config: # a hacky way to make this config works for T5 class
   num_layers: 8
   output_past: true
   tie_word_embeddings: false
-  vocab_size_pitch: 128 # 128 pitch + 1 not found token
-  vocab_size_program: 128 # 128 instruments + 1 drum + 1 not found token
+  vocab_size_pitch: 128 # 128 pitch
+  vocab_size_program: 129 # 128 instruments + 1 drum channel
   vocab_size_onset: ${mel_length} # number of steps in one segment
   vocab_size_offset: ${mel_length} # number of steps in one segment
   encoder_vocab_size: 1024
@@ -29,4 +29,29 @@ config: # a hacky way to make this config works for T5 class
   # new parameters for DETR
   detr_num_tokens: ${event_length}
   detr_hidden_dim: ${model.config.d_model}
+hungarian:
+  matcher:
+    num_classes:
+      - ${model.config.vocab_size_pitch}
+      - ${model.config.vocab_size_program}
+      - ${model.config.vocab_size_onset}
+      - ${model.config.vocab_size_offset}  
+    cost_class: 1
+    cost_bbox: 5
+    cost_giou: 2
+  criterion:
+    num_classes:
+      - ${model.config.vocab_size_pitch}
+      - ${model.config.vocab_size_program}
+      - ${model.config.vocab_size_onset}
+      - ${model.config.vocab_size_offset}
+    weight_dict:
+      loss_ce: 1
+      loss_bbox: 5
+    eos_coef:
+      - 0.1
+      - 0.1
+      - 0.1
+      - 0.1
+
 optim_cfg: ${optim}

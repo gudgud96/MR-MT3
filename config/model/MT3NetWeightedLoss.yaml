@@ -26,10 +26,10 @@ config: # a hacky way to make this config works for T5 class
 loss_weights:
   pitch: 1
   velocity: 1
-  tie: 1
+  tie: 10
   instrument: 1
   drum: 1
   time: 1
-  eos: 1
+  eos: 10
 
 optim_cfg: ${optim}
