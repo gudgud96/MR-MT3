@@ -606,7 +606,10 @@ class SlakhDataset(Dataset):
 
 def collate_fn(lst):
     inputs = torch.cat([k[0] for k in lst])
-    targets = torch.cat([k[1] for k in lst])
+    flatten_targets = []
+
+    for k in lst:
+        flatten_targets.extend(k[1])
     # num_insts = torch.cat([k[2] for k in lst])
 
     # add random shuffling here
@@ -617,7 +620,7 @@ def collate_fn(lst):
     # targets = targets[indices]
     # num_insts = num_insts[indices]
 
-    return inputs, targets
+    return inputs, flatten_targets
 
 if __name__ == '__main__':
     dataset = SlakhDataset(

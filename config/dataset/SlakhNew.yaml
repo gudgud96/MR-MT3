@@ -19,4 +19,4 @@ val:
   shuffle: False
 test:
   root_dir: "/data/slakh2100_flac_redux/validation"
-collate_fn: dataset.dataset_2_random.collate_fn
+collate_fn: dataset.dataset_new.collate_fn
