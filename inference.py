@@ -312,7 +312,7 @@ class InferenceHandler:
                 # check if offset is smaller than onset
                 # print(f"Warning: offset is smaller than onset. Event@{idx}: {event}")
                 pass
-            elif event[1] == 129:
+            elif event[1] == self.model.config.vocab_size_program:
                 # discard empty instrument
                 pass
             elif (event[3] - event[2]) > 20:

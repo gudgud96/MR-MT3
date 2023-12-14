@@ -6,12 +6,12 @@ dataset_type: ${hydra:runtime.choices.dataset}
 seed: 365
 path:
 
-event_length: 288
+event_length: 512
 mel_length: 256
 num_rows_per_batch: 12
 
 optim:
-  lr: 2e-4
+  lr: 2e-5
   warmup_steps: 64500
   num_epochs: ${num_epochs}
   num_steps_per_epoch: # keep it empty since it will be parsed inside train.py  
@@ -25,7 +25,7 @@ dataloader:
     num_workers: 12
   val:
     batch_size: 2
-    num_workers: 12  
+    num_workers: 12
 
 modelcheckpoint:
   monitor: 'val/loss'
@@ -53,5 +53,5 @@ eval:
   audio_dir:  
 
 defaults:
-  - model: DETR
+  - model: DETR_FFN
   - dataset: SlakhNew

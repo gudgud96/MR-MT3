@@ -20,6 +20,7 @@ from transformers import T5Config, T5PreTrainedModel
 from transformers.models.t5.modeling_t5 import Seq2SeqLMOutput, BaseModelOutput, BaseModelOutputWithPastAndCrossAttentions, checkpoint, T5LayerNorm, T5Block
 from transformers.utils import logging
 import torch.nn as nn
+import torch.nn.functional as F
 import copy
 import torch
 from einops import rearrange
@@ -33,6 +34,21 @@ logger = logging.get_logger(__name__)
 class Seq2SeqLMOutputNumInsts(Seq2SeqLMOutput):
     loss_inst: Optional[torch.FloatTensor] = None
 
+
+class MLP(nn.Module):
+    """ Very simple multi-layer perceptron (also called FFN)"""
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        h = [hidden_dim] * (num_layers - 1)
+        self.layers = nn.ModuleList(nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x
+    
 
 class T5DETR(T5PreTrainedModel):
     _keys_to_ignore_on_load_missing = [
@@ -862,3 +878,22 @@ class FixedPositionalEmbedding(nn.Module):
         y = rearrange(emb, 'n d -> () n d')
         y = y[:, offset:offset + seq, :]
         return y
+
+
+class T5DETR_FFN(T5DETR):
+    _keys_to_ignore_on_load_missing = [
+        r"encoder\.embed_tokens\.weight",
+        r"decoder\.embed_tokens\.weight",
+        r"lm_head\.weight",
+    ]
+    _keys_to_ignore_on_load_unexpected = [
+        r"decoder\.block\.0\.layer\.1\.EncDecAttention\.relative_attention_bias\.weight",
+    ]
+
+    def __init__(self, config: T5Config):
+        super().__init__(config)
+
+        self.lm_head_pitch = nn.Linear(config.d_model, config.vocab_size_pitch + 1, bias=False)
+        self.lm_head_program = MLP(config.d_model, config.d_model, config.vocab_size_program + 1, 3)
+        self.lm_head_onset = MLP(config.d_model, config.d_model, config.vocab_size_onset + 1, 3)
+        self.lm_head_offset = MLP(config.d_model, config.d_model, config.vocab_size_offset + 1, 3)

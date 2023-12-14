@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from transformers import T5Config
-from models.t5_detr import T5DETR
+import models.t5_detr as DETR_models
 from utils import get_cosine_schedule_with_warmup
 import pandas as pd
 from .misc import (NestedTensor, nested_tensor_from_tensor_list,
@@ -21,7 +21,8 @@ class DETR(pl.LightningModule):
         self.hungarian = hungarian
         self.optim_cfg = optim_cfg
         T5config = T5Config.from_dict(OmegaConf.to_container(self.config))
-        self.model: nn.Module = T5DETR(T5config)
+        # get the model class given a string name
+        self.model: nn.Module = getattr(DETR_models, self.config.architectures[0])(T5config)
 
         matcher = HungarianMatcher(**hungarian.matcher)
         
@@ -52,9 +53,8 @@ class DETR(pl.LightningModule):
         self.log('train/offset_loss', loss_dict['boxes']['loss_offset'], prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
         self.log('train/loss', total_loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
 
-        if batch_idx == 0:
-            if self.current_epoch == 0:
-                self._log_text(targets, "train/targets", max_sentences=4, logger=self)
+        if batch_idx == 0 and self.current_epoch > 10:
+            self._log_text(targets, "train/targets", max_sentences=4, logger=self)
             # get top1 predictions out of the lm_logits tuples
             pitch_preds = lm_logits[0].argmax(-1)
             program_preds = lm_logits[1].argmax(-1)
@@ -123,12 +123,14 @@ class DETR(pl.LightningModule):
             if idx < max_sentences: 
                 token_str = ''
                 for token in token_seq:
-                    pitch = token[0].item()
-                    program = token[1].item()
-                    onset = token[2].item()
-                    offset = token[3].item()
-                    token_str = token_str + \
-                    f"<{pitch}, {program}, {onset}, {offset}>" + ', '
+                    # ignore empty instrument
+                    if token[1].item() != self.config.vocab_size_program:
+                        pitch = token[0].item()
+                        program = token[1].item()
+                        onset = token[2].item()
+                        offset = token[3].item()
+                        token_str = token_str + \
+                        f"<{pitch}, {program}, {onset}, {offset}>" + ', '
                 plugin_list.append(token_str)        
         s = pd.Series(plugin_list, name="token sequence")
         logger.logger.experiment.add_text(tag, s.to_markdown(), global_step=self.global_step)

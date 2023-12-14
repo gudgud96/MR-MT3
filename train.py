@@ -16,10 +16,9 @@ import os
 import math
 
 import hydra
-from tasks.mt3_net import MT3Net
 
 
-@hydra.main(config_path="config", config_name="config")
+@hydra.main(config_path="config", config_name="config_slakh_newtoken")
 # def main(config, model_config, result_dir, mode, path):
 def main(cfg):
     assert cfg.optim.num_steps_per_epoch == None, 'please keep cfg.optim.num_steps_per_epoch empty'
@@ -46,7 +45,7 @@ def main(cfg):
                                name=f"{cfg.model_type}_{cfg.dataset_type}")
     
     # sanity check to make sure the correct model is used
-    assert cfg.model_type == cfg.model._target_.split('.')[-1]
+    # assert cfg.model_type == cfg.model._target_.split('.')[-1]
 
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
