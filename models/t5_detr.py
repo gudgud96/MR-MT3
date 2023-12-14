@@ -271,50 +271,44 @@ class T5DETR(T5PreTrainedModel):
             return_dict=True
         )
         hidden_states = encoder_outputs[0]
-
-        decoder_input_ids_start = torch.ones((batch_size, 1), dtype=torch.long, device=self.device) * \
-                                    self.config.decoder_start_token_id
         
-        # keep track of which sequences are already finished
-        unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=self.device)
-        eos_token_id_tensor = torch.tensor(self.config.eos_token_id).to(self.device)
+        decoder_outputs = self.decoder(
+            input_ids=None,
+            encoder_hidden_states=hidden_states,
+            # output_hidden_states=output_hidden_states,
+            return_dict=True,
+        )
+
+        # handle output hidden states
+        # if output_hidden_states:
+        #     hidden_states = decoder_outputs.hidden_states # (num_layers + 1, batch_size, 1, hidden_size)
+        #     print('hidden states', hidden_states[0].shape)
+        #     hidden_states = [torch.cat(layer, dim=0) for layer in hidden_states]
+        #     print('dec hidden states', hidden_states[0].shape)
+        #     hidden_states = torch.cat(hidden_states, dim=0)
+        #     print('dec hidden states', hidden_states.shape)
         
-        for l in range(max_length):
-            decoder_outputs = self.decoder(
-                input_ids=decoder_input_ids_start,
-                encoder_hidden_states=hidden_states,
-                # output_hidden_states=output_hidden_states,
-                return_dict=True,
-            )
+        sequence_output = decoder_outputs[0]
+        pitch_logits = self.lm_head_pitch(sequence_output).argmax(-1)
+        program_logits = self.lm_head_program(sequence_output).argmax(-1)
+        onset_logits = self.lm_head_onset(sequence_output).argmax(-1)
+        offset_logits = self.lm_head_offset(sequence_output).argmax(-1)
 
-            # handle output hidden states
-            # if output_hidden_states:
-            #     hidden_states = decoder_outputs.hidden_states # (num_layers + 1, batch_size, 1, hidden_size)
-            #     print('hidden states', hidden_states[0].shape)
-            #     hidden_states = [torch.cat(layer, dim=0) for layer in hidden_states]
-            #     print('dec hidden states', hidden_states[0].shape)
-            #     hidden_states = torch.cat(hidden_states, dim=0)
-            #     print('dec hidden states', hidden_states.shape)
-            
-            sequence_output = decoder_outputs[0]
-            lm_logits = self.lm_head(sequence_output)
-            next_tokens = torch.argmax(lm_logits[:, -1, :].unsqueeze(1), dim=-1)
+        # find the prediction with valid instruments
+        valid_inst = (program_logits != self.config.vocab_size_program)
 
-            next_tokens = next_tokens * unfinished_sequences.unsqueeze(-1) + self.config.pad_token_id * (1 - unfinished_sequences.unsqueeze(-1))
-            eos_indices = torch.where(next_tokens == self.config.eos_token_id)[0]
-            unfinished_sequences[eos_indices] = 0
-            decoder_input_ids_start = torch.cat([decoder_input_ids_start, next_tokens], dim=-1)
+        lm_logits = (pitch_logits[valid_inst].cpu(),
+                     program_logits[valid_inst].cpu(),
+                     onset_logits[valid_inst].cpu(),
+                     offset_logits[valid_inst].cpu())
 
-            # stop when each sentence is finished
-            if unfinished_sequences.max() == 0:
-                break
-            
+
             # print(l, decoder_input_ids_start.shape)
         
         if output_hidden_states:
             return decoder_input_ids_start, hidden_states
         else:
-            return decoder_input_ids_start
+            return lm_logits
     
     def prepare_inputs_for_generation(
         self,

@@ -15,14 +15,27 @@ from evaluate import evaluate_main
 def main(cfg):
     # convert .ckpt to .pth
     assert cfg.path
-    assert cfg.path.endswith(".pt") or cfg.path.endswith("pth"), "Only .pt / .pth files are supported."
+    # assert cfg.path.endswith(".pt") or cfg.path.endswith("pth"), "Only .pt / .pth files are supported."
     assert cfg.eval.exp_tag_name
     assert cfg.eval.audio_dir
 
     pl = hydra.utils.instantiate(cfg.model, optim_cfg=cfg.optim)
     model = pl.model
     print(f"Loading weights from: {cfg.path}")
-    model.load_state_dict(torch.load(cfg.path))
+    if cfg.path.endswith(".ckpt"):
+        print("============Converting .ckpt to .pth...")
+        state_dict = torch.load(cfg.path)['state_dict']
+        dic = {}
+        for key in state_dict:
+            if "model." in key:
+                dic[key.replace("model.", "")] = state_dict[key]
+            elif "criterion." in key:
+                pass                
+            else:
+                dic[key] = state_dict[key]   
+        model.load_state_dict(dic)
+    else:
+        model.load_state_dict(torch.load(cfg.path))
     model.eval()
 
     dir = sorted(glob.glob(cfg.eval.audio_dir))
