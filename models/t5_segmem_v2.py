@@ -129,12 +129,10 @@ class T5SegMemV2(T5SegMem):
         segmem_embeds_agg = self.segmem_encoder(segmem_embeds)[0]                           # (b, l, d)
         segmem_embeds_agg = segmem_embeds_agg[:, :self.segmem_length, :]                    # (b, segmem_length, d)
 
-        # print('hidden_states before', hidden_states.shape)
         hidden_states = torch.cat([
             hidden_states,
             segmem_embeds_agg, 
         ], dim=1)
-        # print('hidden_states after', hidden_states.shape)
 
         # Decode
         decoder_outputs = self.decoder(

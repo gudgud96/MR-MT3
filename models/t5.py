@@ -144,7 +144,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             )
 
         hidden_states = encoder_outputs[0]
-        # print('hidden_states', hidden_states[0][0][:20])
 
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
             # get decoder inputs from shifting lm labels to the right
@@ -174,7 +173,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             sequence_output = sequence_output * (self.model_dim**-0.5)
         
         lm_logits = self.lm_head(sequence_output)
-        # print('lm_logits', lm_logits[0][0][:20])
 
         # mean_hidden_states = self.mean_pool(sequence_output.transpose(1, 2)).squeeze(-1)
         # inst_cls_logits = self.num_inst_cls(mean_hidden_states)
@@ -532,16 +530,12 @@ class T5Stack(T5PreTrainedModel):
                 f"You cannot specify both {err_msg_prefix}input_ids and {err_msg_prefix}inputs_embeds at the same time"
             )
         elif inputs_embeds is not None:
-            # print("t5stack inputs_embeds", self.is_decoder, inputs_embeds.shape)
             input_shape = inputs_embeds.size()[:-1]
         elif input_ids is not None:
-            # print("t5stack input_ids", self.is_decoder, input_ids.shape)
             input_shape = input_ids.size()[:2]
 
         if inputs_embeds is None:
-            # print('input_ids', input_ids.shape)
             inputs_embeds = self.embed_tokens(input_ids)
-            # print('input embeds', inputs_embeds.shape)
 
         batch_size, seq_length = input_shape[:2]
 
@@ -656,7 +650,6 @@ class T5Stack(T5PreTrainedModel):
                 layer_outputs = layer_outputs[:1] + (None,) + layer_outputs[1:]
 
             hidden_states, present_key_value_state = layer_outputs[:2]
-            # print("t5stack hidden_states 2", hidden_states[0][0][:20])
 
             # We share the position biases between the layers - the first layer store them
             # layer_outputs = hidden-states, key-value-states (self-attention position bias), (self-attention weights),
