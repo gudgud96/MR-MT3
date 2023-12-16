@@ -72,7 +72,6 @@ class InferenceHandler:
         frame_size = spectrogram_config.hop_width
         padding = [0, frame_size - len(audio) % frame_size]
         audio = np.pad(audio, padding, mode='constant')
-        print('audio', audio.shape, 'frame_size', frame_size)
         frames = spectrograms.split_audio(audio, spectrogram_config)
         num_frames = len(audio) // frame_size
         times = np.arange(num_frames) / \
@@ -172,7 +171,7 @@ class InferenceHandler:
             inputs_tensor = torch.from_numpy(inputs)
             results = []
             inputs_tensor, frame_times = self._batching(inputs_tensor, frame_times, batch_size=batch_size)
-            print('inferencing', audio_path)
+            # print('inferencing', audio_path)
 
             if self.contiguous_inference:
                 inputs_tensor = torch.cat(inputs_tensor, dim=0)
@@ -191,18 +190,35 @@ class InferenceHandler:
                                             early_stopping=False, bad_words_ids=invalid_programs,
                                             use_cache=False,
                                             )
-                if self.model.__class__.__name__ != "T5DETR":
+                if "DETR" not in self.model.__class__.__name__:
                     result = self._postprocess_batch(result)
-                results.append(result)
-            if self.model.__class__.__name__ != "T5DETR":
+                else:
+                    preds = torch.cat(
+                        (result[0].argmax(-1).unsqueeze(-1),
+                        result[1].argmax(-1).unsqueeze(-1),
+                        result[2].argmax(-1).unsqueeze(-1),
+                        result[3].argmax(-1).unsqueeze(-1)), dim=-1)                    
+
+                    # if results is not defined, we can just assign it
+                    if len(results) == 0:
+                        results = preds
+                    else:
+                        # if results is defined, we need to concatenate it
+                        results = torch.cat((results, preds), dim=0)
+            if "DETR" not in self.model.__class__.__name__:
                 event = self._to_event(results, frame_times)
             else:
-                event = self._to_event_DETR(results)
+                full_results = self._postprocess_batch_detr(results,
+                                                            program_size=self.model.config.vocab_size_program,
+                                                            chunk_size=self.model.config.vocab_size_onset)
+                event = self.token2mid(full_results,
+                                        frames_per_second=self.spectrogram_config.frames_per_second,
+                                        chunk_size=self.model.config.vocab_size_onset)
             if outpath is None:
                 filename = audio_path.split('/')[-1].split('.')[0]
                 outpath = f'./out/{filename}.mid'
             os.makedirs('/'.join(outpath.split('/')[:-1]), exist_ok=True)
-            print("saving", outpath)
+            # print("saving", outpath)
             note_seq.sequence_proto_to_midi_file(event, outpath)
         
         except Exception as e:
@@ -218,6 +234,26 @@ class InferenceHandler:
         result = result[:, 1:]
         result = result.cpu().numpy()
         return result
+    
+    def _postprocess_batch_detr(self, results, program_size, chunk_size):
+        for i, result_i in enumerate(results):
+            # filter out empty events
+            valid_token_mask = result_i[:, 1] != program_size
+            result_i = result_i[valid_token_mask]
+
+            if i==0:
+                full_output = result_i
+            else:
+                onset_tensor = result_i[:, 2] + i*chunk_size # adding frame offset to the local frame
+                offset_tensor = result_i[:, 3] + i*chunk_size # adding frame offset to the local frame
+
+                local_frame = torch.cat((result_i[:, 0].unsqueeze(1),
+                                        result_i[:, 1].unsqueeze(1), 
+                                        onset_tensor.unsqueeze(1), 
+                                        offset_tensor.unsqueeze(1)), dim=-1)
+                
+                full_output = torch.cat((full_output, local_frame), dim=0)
+        return full_output.cpu().numpy()
 
     def _to_event(self, predictions_np: List[np.ndarray], frame_times: np.ndarray):
         predictions = []
@@ -239,39 +275,18 @@ class InferenceHandler:
         return result['est_ns']
     
 
-    def _to_event_DETR(self, results):
-        # step 1: convert the results to numpy
-        output =[]
-        # assigning out of frame events as -1
-        for i, result_i in enumerate(results):
-            # for onset column
-            out_of_frame_onset_idx = (result_i[2] < 0)
-            out_of_frame_offset_idx = (result_i[2] >= 256)
-            onset_tensor = result_i[2] + i*256 # adding frame offset to the local frame
-            onset_tensor[out_of_frame_onset_idx] = -1
-            onset_tensor[out_of_frame_offset_idx] = -1
+    def token2mid(self, tokens, frames_per_second, chunk_size):
+        "tokens must be a full tensor of the shape (num_events, 4)"
 
-            # for offset column
-            out_of_frame_onset_idx = (result_i[3] < 0)
-            out_of_frame_offset_idx = (result_i[3] >= 256)
-            offset_tensor = result_i[3] + i*256 # adding frame offset to the local frame
-            offset_tensor[out_of_frame_onset_idx] = -1
-            offset_tensor[out_of_frame_offset_idx] = -1    
-
-            output.append(torch.cat((result_i[0].unsqueeze(1),
-                                    result_i[1].unsqueeze(1), 
-                                    onset_tensor.unsqueeze(1), 
-                                    offset_tensor.unsqueeze(1)), dim=1))
-            
         # step 2: collecting complete events within a frame to a list
-        model_prediction = torch.vstack([i for i in output])    
+        model_prediction = tokens 
         orphan_onset_events = []
         orphan_offset_events = []
         complete_events = []
         for event in model_prediction:
-            if event[3] == -1:
+            if event[3] == chunk_size:
                 orphan_onset_events.append(event)
-            elif event[2] == -1:
+            elif event[2] == chunk_size:
                 orphan_offset_events.append(event)
             else:
                 complete_events.append(event)
@@ -279,7 +294,7 @@ class InferenceHandler:
         # orphan_onset_events = np.array(orphan_onset_events)
         # orphan_offset_events = np.array(orphan_offset_events)
 
-        # step3: combining cross frame events into a complete event
+        # # step3: combining cross frame events into a complete event
         leftover_onset_events = []
         for onset_idx, onset_event in enumerate(orphan_onset_events):
             # find the offset event that is closest to the onset event
@@ -287,48 +302,41 @@ class InferenceHandler:
                 if offset_event[0] == onset_event[0] and offset_event[1] == onset_event[1]:
                     # if the offset event is the same pitch and instrument
                     # we can add it to the complete_events
-                    complete_events.append(np.array([
-                        onset_event[0],
-                        onset_event[1],
-                        onset_event[2],
-                        offset_event[3]
-                    ]))
-                    # remove the offset event from the orphan_offset_events
-                    orphan_offset_events.pop(offset_idx)
-                    break
-                # if the corresponding offset event is not found
+                    if offset_event[3] - onset_event[2] > chunk_size*3:
+                        # discard events that are too long
+                        continue
+                    else:
+                        complete_events.append(np.array([
+                            onset_event[0],
+                            onset_event[1],
+                            onset_event[2],
+                            offset_event[3]
+                        ]))
+                        # remove the offset event from the orphan_offset_events
+                        orphan_offset_events.pop(offset_idx)
+                        break
+                    # if the corresponding offset event is not found
                 # add it to a new list
                 if offset_idx == len(orphan_offset_events)-1:
                     leftover_onset_events.append(onset_event)
 
-        # print(f"Number of orphan (onset) events {len(leftover_onset_events)}")
-        # print(f"Number of orphan (offset) events {len(orphan_offset_events)}")
-        # print(f"Number of complete events {len(complete_events)}")
 
-        # step 4: converting the complete events to a note sequence
         note_output = note_seq.NoteSequence(ticks_per_quarter=220)
-        for idx, event in enumerate(complete_events):
-            if event[3] < event[2]:
-                # check if offset is smaller than onset
-                # print(f"Warning: offset is smaller than onset. Event@{idx}: {event}")
-                pass
-            elif event[1] == self.model.config.vocab_size_program:
-                # discard empty instrument
-                pass
-            elif (event[3] - event[2]) > 20:
-                # discard events longer than 20 seconds
-                pass
+        for event in complete_events:
+            if event[1] == 129:
+                continue
+            if event[2] > event[3]:
+                continue
             else:
                 note_output.notes.add(
                     pitch=int(event[0]),
-                    start_time=event[2]/self.spectrogram_config.frames_per_second,
-                    end_time=event[3]/self.spectrogram_config.frames_per_second if event[3]!=event[2] else (event[3]+1)/self.spectrogram_config.frames_per_second,
+                    start_time=event[2]/frames_per_second,
+                    end_time=event[3]/frames_per_second if event[3]!=event[2] else (event[3]+1)/frames_per_second,
                     velocity=80,
                     program=int(event[1]) if event[1]!=128 else 0,
                     is_drum=True if event[1]==128 else False,
-                    ) 
-            
+                    )
         note_sequences.assign_instruments(note_output)
-        note_sequences.validate_note_sequence(note_output)    
+        note_sequences.validate_note_sequence(note_output)
 
         return note_output

@@ -278,53 +278,9 @@ class T5DETR(T5PreTrainedModel):
         )
 
         return lm_logits
-    
+        
     def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
-        batch_size = inputs.shape[0]
-        inputs_embeds = self.proj(inputs)
-        encoder_outputs = self.encoder(
-            inputs_embeds=inputs_embeds,
-            return_dict=True
-        )
-        hidden_states = encoder_outputs[0]
-        
-        decoder_outputs = self.decoder(
-            input_ids=None,
-            encoder_hidden_states=hidden_states,
-            # output_hidden_states=output_hidden_states,
-            return_dict=True,
-        )
-
-        # handle output hidden states
-        # if output_hidden_states:
-        #     hidden_states = decoder_outputs.hidden_states # (num_layers + 1, batch_size, 1, hidden_size)
-        #     print('hidden states', hidden_states[0].shape)
-        #     hidden_states = [torch.cat(layer, dim=0) for layer in hidden_states]
-        #     print('dec hidden states', hidden_states[0].shape)
-        #     hidden_states = torch.cat(hidden_states, dim=0)
-        #     print('dec hidden states', hidden_states.shape)
-        
-        sequence_output = decoder_outputs[0]
-        pitch_logits = self.lm_head_pitch(sequence_output).argmax(-1)
-        program_logits = self.lm_head_program(sequence_output).argmax(-1)
-        onset_logits = self.lm_head_onset(sequence_output).argmax(-1)
-        offset_logits = self.lm_head_offset(sequence_output).argmax(-1)
-
-        # find the prediction with valid instruments
-        valid_inst = (program_logits != self.config.vocab_size_program)
-
-        lm_logits = (pitch_logits[valid_inst].cpu(),
-                     program_logits[valid_inst].cpu(),
-                     onset_logits[valid_inst].cpu(),
-                     offset_logits[valid_inst].cpu())
-
-
-            # print(l, decoder_input_ids_start.shape)
-        
-        if output_hidden_states:
-            return decoder_input_ids_start, hidden_states
-        else:
-            return lm_logits
+        return self(inputs=inputs, labels=None)
     
     def prepare_inputs_for_generation(
         self,
