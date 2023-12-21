@@ -50,7 +50,7 @@ trainer:
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
   check_val_every_n_epoch: 1
-  deterministic: True
+  # deterministic: True
 
 eval:
   is_sanity_check: False

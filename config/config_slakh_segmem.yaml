@@ -37,10 +37,10 @@ modelcheckpoint:
   monitor: 'val_loss'
   mode: 'min'
   save_last: True
-  save_top_k: 5
+  save_top_k: -1
   save_weights_only: False
-  every_n_epochs: 50
-  filename: '{epoch}-{step}-{val_loss:.4f}'
+  every_n_epochs: 10
+  filename: '{epoch}-{val_loss:.4f}'
 
 trainer:
   precision: 32
@@ -51,8 +51,8 @@ trainer:
   log_every_n_steps: 100
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
-  check_val_every_n_epoch: 10
-  deterministic: True
+  check_val_every_n_epoch: 1
+  # deterministic: True
 
 eval:
   is_sanity_check: False

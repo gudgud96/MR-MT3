@@ -150,7 +150,6 @@ class T5SegMemV2(T5SegMem):
         )
 
         sequence_output = decoder_outputs[0]  
-        # print('sequence_output', sequence_output.shape)                                              # (b, l + segmem_length, d)
 
         if self.config.tie_word_embeddings:
             # Rescale output before projecting on vocab
@@ -247,7 +246,6 @@ class T5SegMemV2(T5SegMem):
         eos_token_id_tensor = torch.tensor(self.config.eos_token_id).to(self.device)
         
         for l in range(max_length):
-            print(l + 1, '/', max_length, end='\r')
             decoder_outputs = self.decoder(
                 input_ids=decoder_input_ids_start,
                 encoder_hidden_states=hidden_states,
@@ -280,10 +278,10 @@ class T5SegMemV2(T5SegMem):
             
             # print(l, decoder_input_ids_start.shape)
         
-        print('decoder_input_ids_start')
-        for elem in decoder_input_ids_start[0]:
-            print(elem.item(), end=",")
-        print()
+        # print('decoder_input_ids_start')
+        # for elem in decoder_input_ids_start[0]:
+        #     print(elem.item(), end=",")
+        # print()
         if output_hidden_states:
             return decoder_input_ids_start, hidden_states
         else:

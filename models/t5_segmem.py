@@ -60,7 +60,9 @@ class T5SegMem(T5ForConditionalGeneration):
         segmem_config.use_cache = False
         segmem_config.is_encoder_decoder = False
         segmem_config.num_layers = segmem_num_layers
-        self.segmem_encoder = T5Stack(segmem_config, self.segmem_proj)
+        # NOTE: set dropout to 0 for segmem, this is SO important to keep aligned with baseline
+        segmem_config.dropout_rate = 0
+        self.segmem_encoder = T5Stack(segmem_config, self.segmem_proj, "segmem")
         self.segmem_length = segmem_length
 
     def get_model_outputs(

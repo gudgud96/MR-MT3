@@ -61,13 +61,13 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         encoder_config.is_decoder = False
         encoder_config.use_cache = False
         encoder_config.is_encoder_decoder = False
-        self.encoder = T5Stack(encoder_config, self.proj)
+        self.encoder = T5Stack(encoder_config, self.proj, "encoder")
 
         decoder_config = copy.deepcopy(config)
         decoder_config.is_decoder = True
         decoder_config.is_encoder_decoder = False
         decoder_config.num_layers = config.num_decoder_layers
-        self.decoder = T5Stack(decoder_config, self.decoder_embed_tokens)
+        self.decoder = T5Stack(decoder_config, self.decoder_embed_tokens, "decoder")
 
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
         # self.mean_pool = nn.AdaptiveAvgPool1d(1)
@@ -476,7 +476,7 @@ class T5Adversarial(T5ForConditionalGeneration):
 
 
 class T5Stack(T5PreTrainedModel):
-    def __init__(self, config, embed_tokens=None):
+    def __init__(self, config, embed_tokens=None, name=""):
         super().__init__(config)
 
         self.embed_tokens = embed_tokens
@@ -495,6 +495,8 @@ class T5Stack(T5PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
         self.gradient_checkpointing = False
+
+        self.name = name
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -595,8 +597,9 @@ class T5Stack(T5PreTrainedModel):
                 seq=inputs_embeds.shape[1], offset=past_key_values_length)
         inputs_embeds = inputs_embeds + tmp
 
-        # torch.manual_seed(365)
+        # print(self.name, 'before', inputs_embeds[0][0][:5])
         hidden_states = self.dropout(inputs_embeds)
+        # print(self.name, 'after', hidden_states[0][0][:5])
 
         for i, (layer_module, past_key_value) in enumerate(zip(self.block, past_key_values)):
             layer_head_mask = head_mask[i]
@@ -650,6 +653,8 @@ class T5Stack(T5PreTrainedModel):
                 layer_outputs = layer_outputs[:1] + (None,) + layer_outputs[1:]
 
             hidden_states, present_key_value_state = layer_outputs[:2]
+            # if self.name == "decoder":
+            #     print(self.name, 'in loop', i, hidden_states[0][0][:5])
 
             # We share the position biases between the layers - the first layer store them
             # layer_outputs = hidden-states, key-value-states (self-attention position bias), (self-attention weights),
