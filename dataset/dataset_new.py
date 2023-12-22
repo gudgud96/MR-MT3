@@ -603,7 +603,129 @@ class SlakhDataset(Dataset):
         
         res += token_lst[shift_idx[-1]:]
         return res
+    
 
+class SlakhDatasetDuration(SlakhDataset):
+
+    def __init__(
+        self, 
+        root_dir, 
+        mel_length=256, 
+        event_length=1024, 
+        is_train=True, 
+        include_ties=True, 
+        ignore_pitch_bends=True, 
+        onsets_only=False, 
+        audio_filename='mix.flac', 
+        midi_folder='MIDI', 
+        inst_filename='inst_names.json',
+        shuffle=True,
+        num_rows_per_batch=8
+    ) -> None:
+        # pass all arguments to parent class
+        super().__init__(root_dir,
+                         mel_length,
+                         event_length,
+                         is_train,
+                         include_ties,
+                         ignore_pitch_bends,
+                         onsets_only,
+                         audio_filename,
+                         midi_folder,
+                         inst_filename,
+                         shuffle,
+                         num_rows_per_batch)
+ 
+    def _split_frame_new(self, row, length=2000):
+        splits = []
+        input_length = row['inputs'].shape[0]
+
+        # convert time in seconds into time in frames
+        start_frame = np.round(row['targets'][:, 2] * self.spectrogram_config.frames_per_second)
+        end_frame = np.round(row['targets'][:, 3] * self.spectrogram_config.frames_per_second)   
+
+        # chunk the audio into splits of `length` = 2000
+        # during _random_chunk, within each chunk, randomly select a segment = self.mel_length
+        for split in range(0, input_length, length):
+            new_row = {}
+            if split + length >= input_length: # discard the last chunk if it is too short
+                continue
+
+            start_idx = int(split)
+            end_idx = int(split + length)
+            # creating a mask to find active events within the chunk
+            new_row['inputs'] = row['inputs'][start_idx:end_idx]
+            active_mask = np.bitwise_and((start_frame < end_idx), (end_frame > start_idx))
+            new_row['global_frames'] = np.stack((start_frame, end_frame), axis=1)[active_mask]
+            local_start_frame = start_frame - split
+            local_end_frame = end_frame - split
+            duration = local_end_frame.copy() # initialize the duration for the np.subtract function
+            new_row['local_frames'] = np.stack((local_start_frame, local_end_frame), axis=1)[active_mask]
+            new_row['duration'] = np.subtract(local_end_frame,
+                                              local_start_frame,
+                                              where=local_start_frame>=0,
+                                              out=duration)[active_mask]
+            new_row['targets'] = row['targets'][active_mask]
+            splits.append(new_row)
+        
+        return splits
+    
+    def _random_chunk_new(self, row):
+        new_row = {}
+        input_length = row['inputs'].shape[0]
+        random_length = input_length - self.mel_length
+        if random_length < 1:
+            return row
+        start_length = random.randint(0, random_length)     
+
+        start_idx = start_length
+        end_idx = start_length + self.mel_length            
+        active_mask = np.bitwise_and((row['local_frames'][:,0] < end_idx), (row['local_frames'][:,1] > start_idx))
+
+        new_row['targets'] = torch.from_numpy(row['targets'][active_mask])
+        new_row['global_frames'] = torch.from_numpy(row['global_frames'][active_mask])
+        new_row['local_frames'] = torch.from_numpy(row['local_frames'][active_mask]) - start_length
+        new_row['duration'] = torch.from_numpy(row['duration'][active_mask])
+        new_row['inputs'] = row['inputs'][start_length:start_length+self.mel_length]
+
+        return new_row
+    
+    
+    def __getitem__(self, idx):
+        row = self.df[idx]
+        ns, inst_names = self._parse_midi(row['midi_path'], row['inst_names'])
+        audio, sr = librosa.load(row['audio_path'], sr=None)
+        filename = row['audio_path'].split('/')[-2]
+        if sr != self.spectrogram_config.sample_rate:
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=self.spectrogram_config.sample_rate)
+        row_new = self._tokenize_new(ns, audio, inst_names) # convert noteseq data to numpy array
+        # splitting the full audio/token sequence into chunks of 2000 frames
+        splits = self._split_frame_new(row_new)
+        
+        wavs, inputs, targets, debug_targets, debug_local_frames = [], [], [], [], []
+
+        # forming a batch based on self.num_rows_per_batch
+        if len(splits) > self.num_rows_per_batch:
+            start_idx = random.randint(0, len(splits) - self.num_rows_per_batch)
+            splits = splits[start_idx : start_idx + self.num_rows_per_batch]
+
+        for j, row_new in enumerate(splits):
+            row_new = self._random_chunk_new(row_new)
+            row_new = self._compute_spectrogram(row_new)
+
+            target_in_frames = torch.cat(
+                    (row_new["targets"][:,:2], # remove time in seconds
+                     row_new['local_frames'][:], # add onset
+                     row_new['duration'].unsqueeze(-1) # add duration
+                     ), dim=1) 
+            
+            inputs.append(row_new["inputs"])
+            targets.append(target_in_frames.long())
+            # target will be a tensor of shape (num_events, 5)
+            # The 5 columns are: pitch, program, onset, offset, duration
+
+        return torch.stack(inputs), targets
+    
 def collate_fn(lst):
     inputs = torch.cat([k[0] for k in lst])
     flatten_targets = []

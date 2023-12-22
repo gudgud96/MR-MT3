@@ -1,0 +1,22 @@
+train:
+  _target_: dataset.dataset_new.SlakhDatasetDuration # choosing which data class to use
+  root_dir: "/workspace/data/dataset/slakh2100_flac_redux/train"
+  mel_length: ${mel_length}
+  event_length: ${event_length}
+  midi_folder: MIDI
+  inst_filename: inst_names.json
+  audio_filename: mix_16k.wav
+  num_rows_per_batch: ${num_rows_per_batch}
+val:
+  _target_: dataset.dataset_new.SlakhDataset # choosing which data class to use
+  root_dir: "/workspace/data/dataset/slakh2100_flac_redux/validation/"
+  mel_length: ${mel_length}
+  event_length: ${event_length}
+  midi_folder: MIDI
+  inst_filename: inst_names.json
+  audio_filename: mix_16k.wav   
+  num_rows_per_batch: ${num_rows_per_batch}
+  shuffle: False
+test:
+  root_dir: "/workspace/data/dataset/slakh2100_flac_redux/test"
+collate_fn: dataset.dataset_new.collate_fn
