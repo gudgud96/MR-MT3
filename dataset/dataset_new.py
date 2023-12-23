@@ -661,10 +661,9 @@ class SlakhDatasetDuration(SlakhDataset):
             local_end_frame = end_frame - split
             duration = local_end_frame.copy() # initialize the duration for the np.subtract function
             new_row['local_frames'] = np.stack((local_start_frame, local_end_frame), axis=1)[active_mask]
-            new_row['duration'] = np.subtract(local_end_frame,
-                                              local_start_frame,
-                                              where=local_start_frame>=0,
-                                              out=duration)[active_mask]
+            # there is no need to calcuate duration here
+            # will be calcuated in _random_chunk_new    
+
             new_row['targets'] = row['targets'][active_mask]
             splits.append(new_row)
         
@@ -682,11 +681,27 @@ class SlakhDatasetDuration(SlakhDataset):
         end_idx = start_length + self.mel_length            
         active_mask = np.bitwise_and((row['local_frames'][:,0] < end_idx), (row['local_frames'][:,1] > start_idx))
 
-        new_row['targets'] = torch.from_numpy(row['targets'][active_mask])
-        new_row['global_frames'] = torch.from_numpy(row['global_frames'][active_mask])
-        new_row['local_frames'] = torch.from_numpy(row['local_frames'][active_mask]) - start_length
-        new_row['duration'] = torch.from_numpy(row['duration'][active_mask])
+        new_row['targets'] = row['targets'][active_mask]
+        new_row['global_frames'] = row['global_frames'][active_mask]
+        new_row['local_frames'] = row['local_frames'][active_mask] - start_length
+        
+        # initialize the duration for the np.subtract function
+        duration = new_row['local_frames'][:,1].copy()
+        # when onset is in previous frame, duration = offset
+        new_row['duration'] = np.subtract(new_row['local_frames'][:,1],
+                                          new_row['local_frames'][:,0],
+                                          where=new_row['local_frames'][:,0]>=0,
+                                          out=duration)
+
+        # new_row['duration'] = torch.from_numpy(row['duration'][active_mask])
         new_row['inputs'] = row['inputs'][start_length:start_length+self.mel_length]
+
+        # converting numpy arrary to torch tensor
+        new_row['targets'] = torch.from_numpy(new_row['targets'])
+        new_row['global_frames'] = torch.from_numpy(new_row['global_frames'])
+        new_row['local_frames'] = torch.from_numpy(new_row['local_frames'])
+        new_row['duration'] = torch.from_numpy(new_row['duration'])
+
 
         return new_row
     
