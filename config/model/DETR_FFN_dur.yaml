@@ -1,0 +1,57 @@
+_target_: tasks.detr.DETRDur
+config: # a hacky way to make this config works for T5 class
+  architectures:
+    - T5DETR_FFN
+  d_ff: 1024
+  d_kv: 64
+  d_model: 512
+  decoder_start_token_id: 0
+  dropout_rate: 0.1
+  pad_token_id: 0
+  eos_token_id: 1
+  unk_token_id: 2
+  feed_forward_proj: gated-gelu
+  initializer_factor: 1.0
+  is_encoder_decoder: true
+  layer_norm_epsilon: 1e-06
+  model_type: t5
+  num_heads: 6
+  num_decoder_layers: 8
+  num_layers: 8
+  output_past: true
+  tie_word_embeddings: false
+  vocab_size_pitch: 128 # 128 pitch
+  vocab_size_program: 129 # 128 instruments + 1 drum channel
+  vocab_size_onset: ${mel_length} # number of steps in one segment
+  vocab_size_offset: ${mel_length} # number of steps in one segment
+  encoder_vocab_size: 1024
+  xl_context_length: 2048
+  # new parameters for DETR
+  detr_num_tokens: ${event_length}
+  detr_hidden_dim: ${model.config.d_model}
+hungarian:
+  matcher:
+    num_classes:
+      - ${model.config.vocab_size_pitch}
+      - ${model.config.vocab_size_program}
+      - ${model.config.vocab_size_onset}
+      - ${model.config.vocab_size_offset}  
+    cost_class: 1
+    cost_bbox: 5
+    cost_giou: 2
+  criterion:
+    num_classes:
+      - ${model.config.vocab_size_pitch}
+      - ${model.config.vocab_size_program}
+      - ${model.config.vocab_size_onset}
+      - ${model.config.vocab_size_offset}
+    weight_dict:
+      loss_ce: 1
+      loss_bbox: 5
+    eos_coef:
+      - 0.1
+      - 0.1
+      - 0.1
+      - 0.1
+
+optim_cfg: ${optim}

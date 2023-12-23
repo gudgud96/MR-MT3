@@ -25,9 +25,8 @@ class DETR(pl.LightningModule):
         self.model: nn.Module = getattr(DETR_models, self.config.architectures[0])(T5config)
 
         matcher = HungarianMatcher(**hungarian.matcher)
-        
         self.criterion = SetCriterion(**hungarian.criterion,
-                                      matcher = matcher)        
+                                    matcher = matcher) 
 
     def forward(self, *args, **kwargs):
         return self.model.forward(*args, **kwargs)
@@ -136,6 +135,100 @@ class DETR(pl.LightningModule):
         logger.logger.experiment.add_text(tag, s.to_markdown(), global_step=self.global_step)
 
 
+class DETRDur(DETR):
+
+    def __init__(self, config, hungarian, optim_cfg):
+        super().__init__(config, hungarian, optim_cfg)
+        matcher = HungarianMatcherDur(**hungarian.matcher)
+        self.criterion = SetCriterionDur(**hungarian.criterion,
+                                    matcher = matcher)
+
+    def forward(self, *args, **kwargs):
+        return self.model.forward(*args, **kwargs)
+
+    def training_step(self, batch, batch_idx):
+        inputs, targets = batch
+
+        # input.shape = (B, framesize, n_mels) = (B, 256, 512)
+        # targets.shape = (B, n_tokens, 4)
+        lm_logits = self.forward(inputs=inputs, labels=targets)
+
+        loss_dict = self.criterion(lm_logits, targets)
+
+        # the reason that we have the keys "labels" and "boxes" is to keep the code consistent with DETR
+        total_loss = loss_dict['labels']['loss_ce'] * self.criterion.weight_dict['loss_ce'] + \
+                     (loss_dict['boxes']['loss_pitch'] + \
+                      loss_dict['boxes']['loss_onset'] + \
+                      loss_dict['boxes']['loss_dur']) * self.criterion.weight_dict['loss_bbox']
+                      
+        self.log('train/pitch_loss', loss_dict['boxes']['loss_pitch'], prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('train/program_loss', loss_dict['labels']['loss_ce'], prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('train/onset_loss', loss_dict['boxes']['loss_onset'], prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('train/loss_dur', loss_dict['boxes']['loss_dur'], prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('train/loss', total_loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
+
+        if batch_idx == 0 and self.current_epoch > 10:
+            self._log_text_full_target(targets, "train/targets", max_sentences=4, logger=self)
+            # get top1 predictions out of the lm_logits tuples
+            pitch_preds = lm_logits[0].argmax(-1)
+            program_preds = lm_logits[1].argmax(-1)
+            onset_preds = lm_logits[2].argmax(-1)
+            offset_preds = lm_logits[3].argmax(-1)
+            pred = torch.stack((pitch_preds, program_preds, onset_preds, offset_preds), dim=2)
+            self._log_text(pred, "train/preds", max_sentences=4, logger=self)
+        return total_loss
+
+    @torch.no_grad()
+    def validation_step(self, batch, batch_idx):
+        inputs, targets = batch 
+        # input.shape = (B, framesize, n_mels) = (B, 256, 512)
+        # targets.shape = (B, n_tokens, 4)
+        lm_logits = self.forward(inputs=inputs, labels=targets)
+
+        loss_dict = self.criterion(lm_logits, targets)
+
+        # the reason that we have the keys "labels" and "boxes" is to keep the code consistent with DETR
+        total_loss = loss_dict['labels']['loss_ce'] * self.criterion.weight_dict['loss_ce'] + \
+                     (loss_dict['boxes']['loss_pitch'] + \
+                      loss_dict['boxes']['loss_onset'] + \
+                      loss_dict['boxes']['loss_dur']) * self.criterion.weight_dict['loss_bbox']
+
+        self.log('val/pitch_loss', loss_dict['boxes']['loss_pitch'], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/program_loss', loss_dict['labels']['loss_ce'], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/onset_loss', loss_dict['boxes']['loss_onset'], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/offset_loss', loss_dict['boxes']['loss_dur'], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val/loss', total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+
+        if batch_idx == 0:
+            if self.current_epoch == 0:
+                self._log_text_full_target(targets, "val/targets", max_sentences=4, logger=self)
+            pitch_preds = lm_logits[0].argmax(-1)
+            program_preds = lm_logits[1].argmax(-1)
+            onset_preds = lm_logits[2].argmax(-1)
+            offset_preds = lm_logits[3].argmax(-1)
+            pred = torch.stack((pitch_preds, program_preds, onset_preds, offset_preds), dim=2)
+            self._log_text(pred, "val/preds", max_sentences=4, logger=self)
+        # no need to use it in this stage
+        # return loss
+    def _log_text_full_target(self, token_seqs, tag, max_sentences, logger):       
+        plugin_list = []
+        for idx, token_seq in enumerate(token_seqs):
+            if idx < max_sentences: 
+                token_str = ''
+                for token in token_seq:
+                    # ignore empty instrument
+                    if token[1].item() != self.config.vocab_size_program:
+                        pitch = token[0].item()
+                        program = token[1].item()
+                        onset = token[2].item()
+                        offset = token[3].item()
+                        duration = token[4].item()
+                        token_str = token_str + \
+                        f"<{pitch}, {program}, {onset}, {offset}, {duration}>" + ', '
+                plugin_list.append(token_str)        
+        s = pd.Series(plugin_list, name="token sequence")
+        logger.logger.experiment.add_text(tag, s.to_markdown(), global_step=self.global_step)
+
 class HungarianMatcher(nn.Module):
     """This class computes an assignment between the targets and the predictions of the network
 
@@ -230,12 +323,77 @@ class HungarianMatcher(nn.Module):
         sizes = [len(v) for v in targets]
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
+    
+class HungarianMatcherDur(HungarianMatcher):
+    """
+    Modified version of HungarianMatcher for duration prediction
+    """
 
-class SetCriterion(nn.Module):
-    """ This class computes the loss for DETR.
-    The process happens in two steps:
-        1) we compute hungarian assignment between ground truth boxes and the outputs of the model
-        2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
+    def __init__(self, num_classes, cost_class: float = 1, cost_bbox: float = 1, cost_giou: float = 1):
+        super().__init__(num_classes, cost_class, cost_bbox, cost_giou)
+
+
+    @torch.no_grad()
+    def forward(self, outputs, targets):
+
+        pitch_pred = outputs[0]
+        instrument_pred = outputs[1]
+        onset_pred = outputs[2]
+        dur_pred = outputs[3]
+
+        bs, num_queries = pitch_pred.shape[:2]
+
+        # We flatten to compute the cost matrices in a batch
+        out_prob = instrument_pred.flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
+        out_bbox_pitch = pitch_pred.flatten(0, 1)  # [batch_size * num_queries, 128+1]
+        out_bbox_onset = onset_pred.flatten(0, 1)  # [batch_size * num_queries, 256+1]
+        out_bbox_dur = dur_pred.flatten(0, 1)  # [batch_size * num_queries, 256+1]
+
+        # Also concat the target labels and boxes
+        tgt = torch.cat([v for v in targets])
+        tgt_pitch = tgt[:, 0].long()
+        tgt_instru = tgt[:, 1].long()
+        tgt_onset = tgt[:, 2].long()
+        tgt_offset = tgt[:, 3].long()
+        tgt_dur = tgt[:, 4].long()
+
+        # convert out of bound frames to a special class
+        self.out_of_bound_assignment(tgt_onset, self.num_classes[2])
+        self.out_of_bound_assignment(tgt_dur, self.num_classes[3])
+
+        # Compute the classification cost. Contrary to the loss, we don't use the NLL,
+        # but approximate it in 1 - proba[target class].
+        # The 1 is a constant that doesn't change the matching, it can be ommitted.
+        cost_class = -out_prob[:, tgt_instru]
+
+        # It was originally L1 loss
+        # But for our case, the boxes (pitch, onset, offset) are all classifications
+        # will try the same classification cost first
+        cost_pitch = -out_bbox_pitch[:, tgt_pitch]
+        cost_onset = -out_bbox_onset[:, tgt_onset]
+        cost_dur = -out_bbox_dur[:, tgt_dur]
+
+        cost_bbox = cost_pitch + cost_onset + cost_dur
+
+        # Final cost matrix
+        C = self.cost_bbox * cost_bbox + self.cost_class * cost_class
+        C = C.view(bs, num_queries, -1).cpu()
+
+        sizes = [len(v) for v in targets]
+        indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]    
+
+class BaseSetCriterion(nn.Module):
+    """ 
+    Original doc string:
+        This class computes the loss for DETR.
+        The process happens in two steps:
+            1) we compute hungarian assignment between ground truth boxes and the outputs of the model
+            2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
+    Modified doc string:
+        This base class implements the common attributes and methods for
+        a) SetCriterion: token layout (pitch, instrument, onset, offset)
+        b) SetCriterionDur: token layout (pitch, instrument, onset, offset, duration)
     """
     def __init__(self, num_classes, matcher, weight_dict, eos_coef):
         """ Create the criterion.
@@ -254,17 +412,14 @@ class SetCriterion(nn.Module):
         empty_pitch_weight = torch.ones(self.num_classes[0]+1) # added one class for "not found"
         empty_program_weight = torch.ones(self.num_classes[1]+1)
         empty_onset_weight = torch.ones(self.num_classes[2]+1)
-        empty_offset_weight = torch.ones(self.num_classes[3]+1)
 
         empty_pitch_weight[-1] = self.eos_coef[0]
         empty_program_weight[-1] = self.eos_coef[1]
         empty_onset_weight[-1] = self.eos_coef[2]
-        empty_offset_weight[-1] = self.eos_coef[3]
 
         self.register_buffer('empty_pitch_weight', empty_pitch_weight)
         self.register_buffer('empty_program_weight', empty_program_weight)
         self.register_buffer('empty_onset_weight', empty_onset_weight)
-        self.register_buffer('empty_offset_weight', empty_offset_weight)
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
         """Classification loss (NLL)
@@ -298,39 +453,6 @@ class SetCriterion(nn.Module):
         card_pred = (pred_logits.argmax(-1) != pred_logits.shape[-1] - 1).sum(1)
         card_err = F.l1_loss(card_pred.float(), tgt_lengths.float())
         losses = {'cardinality_error': card_err}
-        return losses
-
-    def loss_boxes(self, outputs, targets, indices, num_boxes):
-        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
-           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
-           The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
-        """
-        pitch_logits = outputs[0]
-        onset_logits = outputs[2]
-        offset_logits = outputs[3]
-
-        idx = self._get_src_permutation_idx(indices)
-        pitch_logits = pitch_logits[idx]
-        onset_logits = onset_logits[idx]
-        offset_logits = offset_logits[idx]
-
-        target_pitch = torch.cat([t[:,0][i] for t, (_, i) in zip(targets, indices)], dim=0)
-        target_onset = torch.cat([t[:,2][i] for t, (_, i) in zip(targets, indices)], dim=0)
-        target_offset = torch.cat([t[:,3][i] for t, (_, i) in zip(targets, indices)], dim=0)
-
-        # assign out of bound frames to a special class
-        target_onset[target_onset < 0] = self.num_classes[2]
-        target_offset[target_offset > self.num_classes[3]] = self.num_classes[3]
-
-        loss_pitch = F.cross_entropy(pitch_logits, target_pitch, reduction='none')
-        loss_onset = F.cross_entropy(onset_logits, target_onset, reduction='none')
-        loss_offset = F.cross_entropy(offset_logits, target_offset, reduction='none')
-
-        losses = {}
-        losses['loss_pitch'] = loss_pitch.sum() / num_boxes
-        losses['loss_onset'] = loss_onset.sum() / num_boxes
-        losses['loss_offset'] = loss_offset.sum() / num_boxes
-
         return losses
 
     def _get_src_permutation_idx(self, indices):
@@ -368,5 +490,91 @@ class SetCriterion(nn.Module):
         losses = {}
         losses['labels'] = self.loss_labels(outputs, targets, indices, num_boxes)
         losses['boxes'] = self.loss_boxes(outputs, targets, indices, num_boxes)
+
+        return losses
+
+
+class SetCriterion(BaseSetCriterion):
+    """
+    Offset version of SetCriterion
+    """
+    def __init__(self, num_classes, matcher, weight_dict, eos_coef):
+        super().__init__(num_classes, matcher, weight_dict, eos_coef)
+        empty_offset_weight = torch.ones(self.num_classes[3]+1)
+        empty_offset_weight[-1] = self.eos_coef[3]
+        self.register_buffer('empty_offset_weight', empty_offset_weight)
+
+    def loss_boxes(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+           The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+        """
+        pitch_logits = outputs[0]
+        onset_logits = outputs[2]
+        offset_logits = outputs[3]
+
+        idx = self._get_src_permutation_idx(indices)
+        pitch_logits = pitch_logits[idx]
+        onset_logits = onset_logits[idx]
+        offset_logits = offset_logits[idx]
+
+        target_pitch = torch.cat([t[:,0][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        target_onset = torch.cat([t[:,2][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        target_offset = torch.cat([t[:,3][i] for t, (_, i) in zip(targets, indices)], dim=0)
+
+        # assign out of bound frames to a special class
+        target_onset[target_onset < 0] = self.num_classes[2]
+        target_offset[target_offset > self.num_classes[3]] = self.num_classes[3]
+
+        loss_pitch = F.cross_entropy(pitch_logits, target_pitch, reduction='none')
+        loss_onset = F.cross_entropy(onset_logits, target_onset, reduction='none')
+        loss_offset = F.cross_entropy(offset_logits, target_offset, reduction='none')
+
+        losses = {}
+        losses['loss_pitch'] = loss_pitch.sum() / num_boxes
+        losses['loss_onset'] = loss_onset.sum() / num_boxes
+        losses['loss_offset'] = loss_offset.sum() / num_boxes
+
+        return losses
+    
+class SetCriterionDur(SetCriterion):
+    def __init__(self, num_classes, matcher, weight_dict, eos_coef):
+        super().__init__(num_classes, matcher, weight_dict, eos_coef)
+        empty_duration_weight = torch.ones(self.num_classes[3]+1)
+        empty_duration_weight[-1] = self.eos_coef[3]
+        self.register_buffer('empty_duration_weight', empty_duration_weight)
+
+    def loss_boxes(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+           The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+        """
+        pitch_logits = outputs[0]
+        onset_logits = outputs[2]
+        dur_logits = outputs[3]
+
+        idx = self._get_src_permutation_idx(indices)
+        pitch_logits = pitch_logits[idx]
+        onset_logits = onset_logits[idx]
+        dur_logits = dur_logits[idx]
+
+        target_pitch = torch.cat([t[:,0][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        target_onset = torch.cat([t[:,2][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        target_offset = torch.cat([t[:,3][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        target_dur = torch.cat([t[:,4][i] for t, (_, i) in zip(targets, indices)], dim=0)
+
+        # assign out of bound frames to a special class
+        target_onset[target_onset < 0] = self.num_classes[2]
+        # the offset is only used for finding events that extend beyond the current frame
+        target_dur[target_offset > self.num_classes[3]] = self.num_classes[3]
+
+        loss_pitch = F.cross_entropy(pitch_logits, target_pitch, reduction='none')
+        loss_onset = F.cross_entropy(onset_logits, target_onset, reduction='none')
+        loss_dur = F.cross_entropy(dur_logits, target_dur, reduction='none')
+
+        losses = {}
+        losses['loss_pitch'] = loss_pitch.sum() / num_boxes
+        losses['loss_onset'] = loss_onset.sum() / num_boxes
+        losses['loss_dur'] = loss_dur.sum() / num_boxes
 
         return losses

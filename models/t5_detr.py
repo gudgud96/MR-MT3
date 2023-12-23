@@ -174,6 +174,9 @@ class T5DETR(T5PreTrainedModel):
         hidden_states = encoder_outputs[0]
 
         # Decode
+        # Although labels are used as the input to the decoder
+        # it is not used at all
+        # TODO: set input_ids to None to avoid confusion
         decoder_outputs = self.decoder(
             input_ids=labels,
             attention_mask=decoder_attention_mask,
@@ -837,6 +840,26 @@ class FixedPositionalEmbedding(nn.Module):
 
 
 class T5DETR_FFN(T5DETR):
+    _keys_to_ignore_on_load_missing = [
+        r"encoder\.embed_tokens\.weight",
+        r"decoder\.embed_tokens\.weight",
+        r"lm_head\.weight",
+    ]
+    _keys_to_ignore_on_load_unexpected = [
+        r"decoder\.block\.0\.layer\.1\.EncDecAttention\.relative_attention_bias\.weight",
+    ]
+
+    def __init__(self, config: T5Config):
+        super().__init__(config)
+
+        self.lm_head_pitch = nn.Linear(config.d_model, config.vocab_size_pitch + 1, bias=False)
+        self.lm_head_program = MLP(config.d_model, config.d_model, config.vocab_size_program + 1, 3)
+        self.lm_head_onset = MLP(config.d_model, config.d_model, config.vocab_size_onset + 1, 3)
+        self.lm_head_offset = MLP(config.d_model, config.d_model, config.vocab_size_offset + 1, 3)
+
+
+
+class T5DETR_FFN_dur(T5DETR):
     _keys_to_ignore_on_load_missing = [
         r"encoder\.embed_tokens\.weight",
         r"decoder\.embed_tokens\.weight",
