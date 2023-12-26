@@ -875,4 +875,4 @@ class T5DETR_FFN_dur(T5DETR):
         self.lm_head_pitch = nn.Linear(config.d_model, config.vocab_size_pitch + 1, bias=False)
         self.lm_head_program = MLP(config.d_model, config.d_model, config.vocab_size_program + 1, 3)
         self.lm_head_onset = MLP(config.d_model, config.d_model, config.vocab_size_onset + 1, 3)
-        self.lm_head_offset = MLP(config.d_model, config.d_model, config.vocab_size_offset + 1, 3)
+        self.lm_head_duration = MLP(config.d_model, config.d_model, config.vocab_size_offset + 1, 3)
