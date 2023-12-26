@@ -234,18 +234,30 @@ class InferenceHandler:
         result = result[:, 1:]
         result = result.cpu().numpy()
         return result
-    
+
     def _postprocess_batch_detr(self, results, program_size, chunk_size):
         for i, result_i in enumerate(results):
             # filter out empty events
             valid_token_mask = result_i[:, 1] != program_size
             result_i = result_i[valid_token_mask]
 
+            # obtain the mask for out of bound onset and offset
+            out_of_bound_onset = (result_i[:, 2] == chunk_size)
+            out_of_bound_offset = (result_i[:, 3] == chunk_size)        
+
             if i==0:
+                # assigning out of bound events to -1
+                result_i[:,2][out_of_bound_onset] = -1 # for onset
+                result_i[:,3][out_of_bound_offset] = -1 # for offset
+                
                 full_output = result_i
             else:
                 onset_tensor = result_i[:, 2] + i*chunk_size # adding frame offset to the local frame
                 offset_tensor = result_i[:, 3] + i*chunk_size # adding frame offset to the local frame
+
+                # assigning out of bound events to -1
+                onset_tensor[out_of_bound_onset] = -1 # for onset
+                offset_tensor[out_of_bound_offset] = -1 # for offset
 
                 local_frame = torch.cat((result_i[:, 0].unsqueeze(1),
                                         result_i[:, 1].unsqueeze(1), 
@@ -253,27 +265,11 @@ class InferenceHandler:
                                         offset_tensor.unsqueeze(1)), dim=-1)
                 
                 full_output = torch.cat((full_output, local_frame), dim=0)
+
+
+
+
         return full_output.cpu().numpy()
-
-    def _to_event(self, predictions_np: List[np.ndarray], frame_times: np.ndarray):
-        predictions = []
-        for i, batch in enumerate(predictions_np):
-            for j, tokens in enumerate(batch):
-                tokens = tokens[:np.argmax(
-                    tokens == vocabularies.DECODED_EOS_ID)]
-                start_time = frame_times[i][j][0]
-                start_time -= start_time % (1 / self.codec.steps_per_second)
-                predictions.append({
-                    'est_tokens': tokens,
-                    'start_time': start_time,
-                    'raw_inputs': []
-                })
-
-        encoding_spec = note_sequences.NoteEncodingWithTiesSpec
-        result = metrics_utils.event_predictions_to_ns(
-            predictions, codec=self.codec, encoding_spec=encoding_spec)
-        return result['est_ns']
-    
 
     def token2mid(self, tokens, frames_per_second, chunk_size):
         "tokens must be a full tensor of the shape (num_events, 4)"
@@ -284,9 +280,9 @@ class InferenceHandler:
         orphan_offset_events = []
         complete_events = []
         for event in model_prediction:
-            if event[3] == chunk_size:
+            if event[3] == -1:
                 orphan_onset_events.append(event)
-            elif event[2] == chunk_size:
+            elif event[2] == -1:
                 orphan_offset_events.append(event)
             else:
                 complete_events.append(event)
@@ -304,8 +300,11 @@ class InferenceHandler:
                     # we can add it to the complete_events
                     if offset_event[3] - onset_event[2] > chunk_size*3:
                         # discard events that are too long
-                        continue
-                    else:
+                        # since the offset is in asecending order
+                        # we can skip search if the first offset found is already too long
+                        # print(f"discarded event {onset_idx=}, {offset_idx=}")
+                        break
+                    elif offset_event[3] > onset_event[2]:
                         complete_events.append(np.array([
                             onset_event[0],
                             onset_event[1],
@@ -313,6 +312,7 @@ class InferenceHandler:
                             offset_event[3]
                         ]))
                         # remove the offset event from the orphan_offset_events
+                        # print(f"succesfully added {complete_events[-1]}")
                         orphan_offset_events.pop(offset_idx)
                         break
                     # if the corresponding offset event is not found
@@ -340,3 +340,22 @@ class InferenceHandler:
         note_sequences.validate_note_sequence(note_output)
 
         return note_output
+
+    def _to_event(self, predictions_np: List[np.ndarray], frame_times: np.ndarray):
+        predictions = []
+        for i, batch in enumerate(predictions_np):
+            for j, tokens in enumerate(batch):
+                tokens = tokens[:np.argmax(
+                    tokens == vocabularies.DECODED_EOS_ID)]
+                start_time = frame_times[i][j][0]
+                start_time -= start_time % (1 / self.codec.steps_per_second)
+                predictions.append({
+                    'est_tokens': tokens,
+                    'start_time': start_time,
+                    'raw_inputs': []
+                })
+
+        encoding_spec = note_sequences.NoteEncodingWithTiesSpec
+        result = metrics_utils.event_predictions_to_ns(
+            predictions, codec=self.codec, encoding_spec=encoding_spec)
+        return result['est_ns']
