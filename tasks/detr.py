@@ -537,7 +537,7 @@ class SetCriterion(BaseSetCriterion):
 
         return losses
     
-class SetCriterionDur(SetCriterion):
+class SetCriterionDur(BaseSetCriterion):
     def __init__(self, num_classes, matcher, weight_dict, eos_coef):
         super().__init__(num_classes, matcher, weight_dict, eos_coef)
         empty_duration_weight = torch.ones(self.num_classes[3]+1)
