@@ -9,7 +9,7 @@ path:
 event_length: 1024
 mel_length: 256
 num_rows_per_batch: 12
-split_frame_length: 256
+split_frame_length: 2000
 dataset_is_deterministic: False
 dataset_is_randomize_tokens: True
 dataset_use_tf_spectral_ops: False
