@@ -208,9 +208,14 @@ class InferenceHandler:
             if "DETR" not in self.model.__class__.__name__:
                 event = self._to_event(results, frame_times)
             else:
-                full_results = self._postprocess_batch_detr(results,
+                if "_dur" in self.model.__class__.__name__:
+                    full_results = self._postprocess_batch_detr_dur(results,
                                                             program_size=self.model.config.vocab_size_program,
                                                             chunk_size=self.model.config.vocab_size_onset)
+                else:
+                    full_results = self._postprocess_batch_detr(results,
+                                                                program_size=self.model.config.vocab_size_program,
+                                                                chunk_size=self.model.config.vocab_size_onset)
                 event = self.token2mid(full_results,
                                         frames_per_second=self.spectrogram_config.frames_per_second,
                                         chunk_size=self.model.config.vocab_size_onset)
@@ -258,6 +263,44 @@ class InferenceHandler:
                 # assigning out of bound events to -1
                 onset_tensor[out_of_bound_onset] = -1 # for onset
                 offset_tensor[out_of_bound_offset] = -1 # for offset
+
+                local_frame = torch.cat((result_i[:, 0].unsqueeze(1),
+                                        result_i[:, 1].unsqueeze(1), 
+                                        onset_tensor.unsqueeze(1), 
+                                        offset_tensor.unsqueeze(1)), dim=-1)
+                
+                full_output = torch.cat((full_output, local_frame), dim=0)
+
+
+
+
+        return full_output.cpu().numpy()
+    
+    def _postprocess_batch_detr_dur(self, results, program_size, chunk_size):
+        for i, result_i in enumerate(results):
+            # filter out empty events
+            valid_token_mask = result_i[:, 1] != program_size
+            result_i = result_i[valid_token_mask]
+
+            # obtain the mask for out of bound onset and offset
+            out_of_bound_onset = (result_i[:, 2] == chunk_size)
+            out_of_bound_dur = (result_i[:, 3] == chunk_size)        
+
+            if i==0:
+                # assigning out of bound events to -1
+                result_i[:,2][out_of_bound_onset] = -1 # for onset
+                result_i[:,3][out_of_bound_dur] = -1 # for offset
+                
+                full_output = result_i
+            else:
+                onset_tensor = result_i[:, 2] + i*chunk_size # adding frame offset to the local frame
+                duration_tensor = result_i[:, 3]
+                offset_tensor = onset_tensor + duration_tensor
+
+
+                # assigning out of bound events to -1
+                onset_tensor[out_of_bound_onset] = -1 # for onset
+                offset_tensor[out_of_bound_dur] = -1 # for offset
 
                 local_frame = torch.cat((result_i[:, 0].unsqueeze(1),
                                         result_i[:, 1].unsqueeze(1), 

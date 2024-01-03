@@ -93,10 +93,9 @@ class T5DETR(T5PreTrainedModel):
         # 128 instruments + 1 drum + (optional: 1 not found token = 130)
         # number of steps in one segment + 1 not found token
         # number of steps in one segment + 1 not found token
-        self.lm_head_pitch = nn.Linear(config.d_model, config.vocab_size_pitch + 1, bias=False)
-        self.lm_head_program = nn.Linear(config.d_model, config.vocab_size_program + 1, bias=False)
-        self.lm_head_onset = nn.Linear(config.d_model, config.vocab_size_onset + 1, bias=False)
-        self.lm_head_offset = nn.Linear(config.d_model, config.vocab_size_offset + 1, bias=False)
+        self.lm_head_pitch = MLP(config.d_model, config.d_model, config.vocab_size_pitch + 1, 3)
+        self.lm_head_program = MLP(config.d_model, config.d_model, config.vocab_size_program + 1, 3)
+        self.lm_head_onset = MLP(config.d_model, config.d_model, config.vocab_size_onset + 1, 3)
         # self.mean_pool = nn.AdaptiveAvgPool1d(1)
         # self.num_inst_cls = nn.Linear(config.d_model, 16)
 
@@ -123,95 +122,6 @@ class T5DETR(T5PreTrainedModel):
 
     def get_decoder(self):
         return self.decoder
-
-    def get_model_outputs(
-        self,
-        inputs: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        decoder_input_ids: Optional[torch.LongTensor] = None,
-        decoder_attention_mask: Optional[torch.BoolTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        decoder_head_mask: Optional[torch.FloatTensor] = None,
-        cross_attn_head_mask: Optional[torch.Tensor] = None,
-        encoder_outputs: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ):
-        # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
-        if head_mask is not None and decoder_head_mask is None:
-            if self.config.num_layers == self.config.num_decoder_layers:
-                decoder_head_mask = head_mask
-        if inputs is not None:
-            inputs_embeds = self.proj(inputs)
-
-        # Encode if needed (training, first prediction pass)
-        if encoder_outputs is None:
-            # Convert encoder inputs in embeddings if needed
-            encoder_outputs = self.encoder(
-                input_ids=None,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                head_mask=head_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
-        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
-            encoder_outputs = BaseModelOutput(
-                last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(
-                    encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(
-                    encoder_outputs) > 2 else None,
-            )
-
-        hidden_states = encoder_outputs[0]
-
-        # Decode
-        # Although labels are used as the input to the decoder
-        # it is not used at all
-        # TODO: set input_ids to None to avoid confusion
-        decoder_outputs = self.decoder(
-            input_ids=labels,
-            attention_mask=decoder_attention_mask,
-            inputs_embeds=decoder_inputs_embeds,
-            past_key_values=past_key_values,
-            encoder_hidden_states=hidden_states,
-            encoder_attention_mask=attention_mask,
-            head_mask=decoder_head_mask,
-            cross_attn_head_mask=cross_attn_head_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        sequence_output = decoder_outputs[0]
-
-        # There is no tie in the new token design
-        # if self.config.tie_word_embeddings:
-        #     # Rescale output before projecting on vocab
-        #     # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
-        #     sequence_output = sequence_output * (self.model_dim**-0.5)
-        
-        # Having four classifiers to predict pitch, program, onset, offset
-        pitch_logits = self.lm_head_pitch(sequence_output)
-        program_logits = self.lm_head_program(sequence_output)
-        onset_logits = self.lm_head_onset(sequence_output)
-        offset_logits = self.lm_head_offset(sequence_output)
-
-        lm_logits = (pitch_logits, program_logits, onset_logits, offset_logits)
-
-        # mean_hidden_states = self.mean_pool(sequence_output.transpose(1, 2)).squeeze(-1)
-        # inst_cls_logits = self.num_inst_cls(mean_hidden_states)
-        
-        return lm_logits, encoder_outputs, decoder_outputs
 
     def forward(
         self,
@@ -851,11 +761,96 @@ class T5DETR_FFN(T5DETR):
 
     def __init__(self, config: T5Config):
         super().__init__(config)
-
-        self.lm_head_pitch = nn.Linear(config.d_model, config.vocab_size_pitch + 1, bias=False)
-        self.lm_head_program = MLP(config.d_model, config.d_model, config.vocab_size_program + 1, 3)
-        self.lm_head_onset = MLP(config.d_model, config.d_model, config.vocab_size_onset + 1, 3)
         self.lm_head_offset = MLP(config.d_model, config.d_model, config.vocab_size_offset + 1, 3)
+
+    def get_model_outputs(
+        self,
+        inputs: Optional[torch.FloatTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        decoder_attention_mask: Optional[torch.BoolTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        decoder_head_mask: Optional[torch.FloatTensor] = None,
+        cross_attn_head_mask: Optional[torch.Tensor] = None,
+        encoder_outputs: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ):
+        # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
+        if head_mask is not None and decoder_head_mask is None:
+            if self.config.num_layers == self.config.num_decoder_layers:
+                decoder_head_mask = head_mask
+        if inputs is not None:
+            inputs_embeds = self.proj(inputs)
+
+        # Encode if needed (training, first prediction pass)
+        if encoder_outputs is None:
+            # Convert encoder inputs in embeddings if needed
+            encoder_outputs = self.encoder(
+                input_ids=None,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                head_mask=head_mask,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
+            encoder_outputs = BaseModelOutput(
+                last_hidden_state=encoder_outputs[0],
+                hidden_states=encoder_outputs[1] if len(
+                    encoder_outputs) > 1 else None,
+                attentions=encoder_outputs[2] if len(
+                    encoder_outputs) > 2 else None,
+            )
+
+        hidden_states = encoder_outputs[0]
+
+        # Decode
+        # Although labels are used as the input to the decoder
+        # it is not used at all
+        # TODO: set input_ids to None to avoid confusion
+        decoder_outputs = self.decoder(
+            input_ids=labels,
+            attention_mask=decoder_attention_mask,
+            inputs_embeds=decoder_inputs_embeds,
+            past_key_values=past_key_values,
+            encoder_hidden_states=hidden_states,
+            encoder_attention_mask=attention_mask,
+            head_mask=decoder_head_mask,
+            cross_attn_head_mask=cross_attn_head_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        sequence_output = decoder_outputs[0]
+
+        # There is no tie in the new token design
+        # if self.config.tie_word_embeddings:
+        #     # Rescale output before projecting on vocab
+        #     # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
+        #     sequence_output = sequence_output * (self.model_dim**-0.5)
+        
+        # Having four classifiers to predict pitch, program, onset, offset
+        pitch_logits = self.lm_head_pitch(sequence_output)
+        program_logits = self.lm_head_program(sequence_output)
+        onset_logits = self.lm_head_onset(sequence_output)
+        offset_logits = self.lm_head_offset(sequence_output)
+
+        lm_logits = (pitch_logits, program_logits, onset_logits, offset_logits)
+
+        # mean_hidden_states = self.mean_pool(sequence_output.transpose(1, 2)).squeeze(-1)
+        # inst_cls_logits = self.num_inst_cls(mean_hidden_states)
+        
+        return lm_logits, encoder_outputs, decoder_outputs        
 
 
 
@@ -871,8 +866,93 @@ class T5DETR_FFN_dur(T5DETR):
 
     def __init__(self, config: T5Config):
         super().__init__(config)
-
-        self.lm_head_pitch = nn.Linear(config.d_model, config.vocab_size_pitch + 1, bias=False)
-        self.lm_head_program = MLP(config.d_model, config.d_model, config.vocab_size_program + 1, 3)
-        self.lm_head_onset = MLP(config.d_model, config.d_model, config.vocab_size_onset + 1, 3)
         self.lm_head_duration = MLP(config.d_model, config.d_model, config.vocab_size_offset + 1, 3)
+
+    def get_model_outputs(
+        self,
+        inputs: Optional[torch.FloatTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        decoder_attention_mask: Optional[torch.BoolTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        decoder_head_mask: Optional[torch.FloatTensor] = None,
+        cross_attn_head_mask: Optional[torch.Tensor] = None,
+        encoder_outputs: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ):
+        # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
+        if head_mask is not None and decoder_head_mask is None:
+            if self.config.num_layers == self.config.num_decoder_layers:
+                decoder_head_mask = head_mask
+        if inputs is not None:
+            inputs_embeds = self.proj(inputs)
+
+        # Encode if needed (training, first prediction pass)
+        if encoder_outputs is None:
+            # Convert encoder inputs in embeddings if needed
+            encoder_outputs = self.encoder(
+                input_ids=None,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                head_mask=head_mask,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
+            encoder_outputs = BaseModelOutput(
+                last_hidden_state=encoder_outputs[0],
+                hidden_states=encoder_outputs[1] if len(
+                    encoder_outputs) > 1 else None,
+                attentions=encoder_outputs[2] if len(
+                    encoder_outputs) > 2 else None,
+            )
+
+        hidden_states = encoder_outputs[0]
+
+        # Decode
+        # Although labels are used as the input to the decoder
+        # it is not used at all
+        # TODO: set input_ids to None to avoid confusion
+        decoder_outputs = self.decoder(
+            input_ids=labels,
+            attention_mask=decoder_attention_mask,
+            inputs_embeds=decoder_inputs_embeds,
+            past_key_values=past_key_values,
+            encoder_hidden_states=hidden_states,
+            encoder_attention_mask=attention_mask,
+            head_mask=decoder_head_mask,
+            cross_attn_head_mask=cross_attn_head_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        sequence_output = decoder_outputs[0]
+
+        # There is no tie in the new token design
+        # if self.config.tie_word_embeddings:
+        #     # Rescale output before projecting on vocab
+        #     # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
+        #     sequence_output = sequence_output * (self.model_dim**-0.5)
+        
+        # Having four classifiers to predict pitch, program, onset, offset
+        pitch_logits = self.lm_head_pitch(sequence_output)
+        program_logits = self.lm_head_program(sequence_output)
+        onset_logits = self.lm_head_onset(sequence_output)
+        offset_logits = self.lm_head_duration(sequence_output)
+
+        lm_logits = (pitch_logits, program_logits, onset_logits, offset_logits)
+
+        # mean_hidden_states = self.mean_pool(sequence_output.transpose(1, 2)).squeeze(-1)
+        # inst_cls_logits = self.num_inst_cls(mean_hidden_states)
+        
+        return lm_logits, encoder_outputs, decoder_outputs        

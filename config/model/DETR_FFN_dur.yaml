@@ -1,7 +1,7 @@
 _target_: tasks.detr.DETRDur
 config: # a hacky way to make this config works for T5 class
   architectures:
-    - T5DETR_FFN
+    - T5DETR_FFN_dur
   d_ff: 1024
   d_kv: 64
   d_model: 512
