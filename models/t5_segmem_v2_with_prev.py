@@ -112,7 +112,6 @@ class T5SegMemV2WithPrev(T5SegMemV2):
         
         assert self.config.pad_token_id == 0
         targets_prev.masked_fill_(targets_prev == -100, self.config.pad_token_id)
-        # print('targets_prev', targets_prev, targets_prev.shape)
 
         segmem_embeds = self.decoder_embed_tokens(targets_prev)                             # (b, l, d)
         segmem_embeds_agg = self.segmem_encoder(segmem_embeds)[0]                           # (b, l, d)
@@ -220,7 +219,7 @@ class T5SegMemV2WithPrev(T5SegMemV2):
 
         return lm_logits
 
-    def generate_2(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
+    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
         batch_size = inputs.shape[0]
         inputs_embeds = self.proj(inputs)
         encoder_outputs = self.encoder(
@@ -297,7 +296,7 @@ class T5SegMemV2WithPrev(T5SegMemV2):
         # print()
         return outs_lst
 
-    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
+    def generate_2(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
         batch_size = inputs.shape[0]
         inputs_embeds = self.proj(inputs)
         encoder_outputs = self.encoder(

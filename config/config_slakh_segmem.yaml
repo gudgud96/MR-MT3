@@ -13,6 +13,7 @@ split_frame_length: 256
 dataset_is_deterministic: False
 dataset_is_randomize_tokens: True
 dataset_use_tf_spectral_ops: False
+dataset_prev_augment_frames: 
 
 model_segmem_length: 4
 

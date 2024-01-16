@@ -10,13 +10,13 @@ import note_seq
 from glob import glob
 from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding, metrics_utils
 from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
-from dataset.dataset_2_random import SlakhDataset
+from dataset.dataset_2_random_segmem_prev import SlakhDatasetWithPrevSegmem
 import soundfile as sf
 
 MIN_LOG_MEL = -12
 MAX_LOG_MEL = 5
 
-class SlakhDatasetWithPrevSegmem(SlakhDataset):
+class SlakhDatasetWithPrevSegmemAugment(SlakhDatasetWithPrevSegmem):
 
     def __init__(
         self, 
@@ -35,7 +35,8 @@ class SlakhDatasetWithPrevSegmem(SlakhDataset):
         split_frame_length=2000,
         is_randomize_tokens=True,
         is_deterministic=False,
-        use_tf_spectral_ops=True
+        use_tf_spectral_ops=True,
+        prev_augment_frames=1,
     ) -> None:
         super().__init__(
             root_dir=root_dir, 
@@ -55,93 +56,8 @@ class SlakhDatasetWithPrevSegmem(SlakhDataset):
             is_deterministic=is_deterministic,
             use_tf_spectral_ops=use_tf_spectral_ops
         )
-
-    def _extract_target_sequence_with_indices(self, features, state_events_end_token=None):
-        """Extract target sequence corresponding to audio token segment."""
-        # ===== current segment tokens ===== #
-        target_start_idx = features['input_event_start_indices'][0]
-        target_end_idx = features['input_event_end_indices'][-1]
-
-        targets_orig = features['targets'][:]
-        features['targets'] = targets_orig[target_start_idx:target_end_idx]
-
-        if state_events_end_token is not None:
-            # Extract the state events corresponding to the audio start token, and
-            # prepend them to the targets array.
-            state_event_start_idx = features['input_state_event_indices'][0]
-            state_event_end_idx = state_event_start_idx + 1
-            while features['state_events'][
-                    state_event_end_idx - 1] != state_events_end_token:
-                state_event_end_idx += 1
-            
-            features['targets'] = np.concatenate([
-                features['state_events'][state_event_start_idx:state_event_end_idx],
-                features['targets']
-            ], axis=0)
-
-        # ===== prev segment tokens ===== #
-        if 'input_event_start_indices_prev' in features:
-            target_start_idx_prev = features['input_event_start_indices_prev'][0]
-            target_end_idx_prev = features['input_event_end_indices_prev'][-1]
-            features['targets_prev'] = targets_orig[target_start_idx_prev:target_end_idx_prev]
-
-            if state_events_end_token is not None:
-                # Extract the state events corresponding to the audio start token, and
-                # prepend them to the targets array.
-                state_event_start_idx_prev = features['input_state_event_indices_prev'][0]
-                state_event_end_idx_prev = state_event_start_idx_prev + 1
-
-                while features['state_events'][
-                        state_event_end_idx_prev - 1] != state_events_end_token:
-                    state_event_end_idx_prev += 1
-                            
-                features['targets_prev'] = np.concatenate([
-                    features['state_events'][state_event_start_idx_prev:state_event_end_idx_prev],
-                    features['targets_prev']
-                ], axis=0)
-        else:
-            features['targets_prev'] = np.array([1131, 1])
-
-        return features
-
-    def _pad_length(self, row):
-        inputs = row['inputs'][:self.mel_length].to(torch.float32)
-
-        # current segment targets
-        targets = torch.from_numpy(row['targets'][:self.event_length]).to(torch.long)
-        targets = targets + self.vocab.num_special_tokens()
-
-        # prev segment targets
-        targets_prev = torch.from_numpy(row['targets_prev'][:self.event_length]).to(torch.long)
-        targets_prev = targets_prev + self.vocab.num_special_tokens()
-
-        if inputs.shape[0] < self.mel_length:
-            pad = torch.zeros(self.mel_length - inputs.shape[0], inputs.shape[1], dtype=inputs.dtype, device=inputs.device)
-            inputs = torch.cat([inputs, pad], dim=0)
-        
-        if targets.shape[0] < self.event_length:
-            eos = torch.ones(1, dtype=targets.dtype, device=targets.device)
-            if self.event_length - targets.shape[0] - 1 > 0:
-                pad = torch.ones(self.event_length - targets.shape[0] - 1, dtype=targets.dtype, device=targets.device) * -100
-                targets = torch.cat([targets, eos, pad], dim=0)
-            else:
-                targets = torch.cat([targets, eos], dim=0)
-        
-        if targets_prev.shape[0] < self.event_length:
-            eos = torch.ones(1, dtype=targets_prev.dtype, device=targets_prev.device)
-            if self.event_length - targets_prev.shape[0] - 1 > 0:
-                pad = torch.ones(self.event_length - targets_prev.shape[0] - 1, dtype=targets_prev.dtype, device=targets_prev.device) * -100
-                targets_prev = torch.cat([targets_prev, eos, pad], dim=0)
-            else:
-                targets_prev = torch.cat([targets_prev, eos], dim=0)
-        
-        return {
-            'inputs': inputs, 
-            'targets': targets, 
-            'targets_prev': targets_prev,
-            "input_times": row["input_times"]
-        }
-    
+        self.prev_augment_frames = prev_augment_frames
+   
     def _random_chunk(self, row):
         new_row = {}
         input_length = row['inputs'].shape[0]
@@ -151,13 +67,19 @@ class SlakhDatasetWithPrevSegmem(SlakhDataset):
         if self.is_deterministic:
             start_length = 16
         else:
-            # NOTE: this is temporary, start_length must be at least 1 mel_length later
             start_length = random.randint(0, random_length)
-            start_length_prev = start_length - self.mel_length
+
+            # NOTE: augmentation 1: we don't just get context only from the previous segment (`mel_length` frames before),
+            # but we can get it up to N segments before. The hypothesis is that close enough segments can alsp give context.
+            prev_segment_index = random.randint(1, self.prev_augment_frames)
+            # print('prev_segment_index', prev_segment_index, self.prev_augment_frames)
+            start_length_prev = start_length - prev_segment_index * self.mel_length
+        
         for k in row.keys():
             if k in ['inputs', 'input_times', 'input_event_start_indices', 'input_event_end_indices', 'input_state_event_indices']:
                 new_row[k] = row[k][start_length:start_length+self.mel_length]
 
+                # NOTE: with augmentation 1, we might have more cases that result in empty context
                 if start_length_prev > 0:
                     new_row[k + '_prev'] = row[k][start_length_prev:start_length_prev+self.mel_length]
             else:
@@ -175,8 +97,6 @@ class SlakhDatasetWithPrevSegmem(SlakhDataset):
         # if we need to ensure that the chunks in `rows` to be contiguous, use:
         rows = self._split_frame(row, length=self.split_frame_length)
         # rows = self._split_frame(row)
-
-        # print('self.is_deterministic', self.is_deterministic)
         
         inputs, targets, targets_prev, frame_times, num_insts = [], [], [], [], []
         if len(rows) > self.num_rows_per_batch:
@@ -286,7 +206,7 @@ def collate_fn(lst):
     return inputs, targets, targets_prev
 
 if __name__ == '__main__':
-    dataset = SlakhDatasetWithPrevSegmem(
+    dataset = SlakhDatasetWithPrevSegmemAugment(
         root_dir='/data/slakh2100_flac_redux/test/',
         shuffle=False,
         is_train=False,
@@ -294,7 +214,7 @@ if __name__ == '__main__':
         mel_length=256,
         split_frame_length=2000,
         is_deterministic=False,
-        is_randomize_tokens=False
+        is_randomize_tokens=False,
     )
     print("pitch", dataset.codec.event_type_range("pitch"))
     print("velocity", dataset.codec.event_type_range("velocity"))
