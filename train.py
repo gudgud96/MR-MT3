@@ -55,12 +55,48 @@ def main(cfg):
         collate_fn=hydra.utils.get_method(cfg.dataset.collate_fn)
     )
 
-    trainer.fit(
-        model, 
-        train_loader, 
-        val_loader,
-        ckpt_path=cfg.path
-    )
+    if cfg.path is not None and cfg.path != "":
+        if cfg.path.endswith(".ckpt"):
+            print(f"Validating on {cfg.path}...")
+            trainer.validate(
+                model, 
+                val_loader,
+                ckpt_path=cfg.path
+            )
+            print("Training start...")
+            trainer.fit(
+                model, 
+                train_loader, 
+                val_loader,
+                ckpt_path=cfg.path
+            )
+
+        elif cfg.path.endswith(".pth"):
+            print(f"Loading weights from {cfg.path}...")
+            model.model.load_state_dict(
+                torch.load(cfg.path),
+                strict=False
+            )
+            trainer.validate(
+                model, 
+                val_loader,
+            )
+            print("Training start...")
+            trainer.fit(
+                model, 
+                train_loader, 
+                val_loader,
+            )
+        
+        else:
+            raise ValueError(f"Invalid extension for path: {cfg.path}")
+    
+    else:
+        trainer.fit(
+                model, 
+                train_loader, 
+                val_loader,
+            )    
 
     # save the model in .pt format
     current_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir

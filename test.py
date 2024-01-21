@@ -96,6 +96,7 @@ def main(cfg):
     if cfg.path.endswith(".ckpt"):
         # load lightning module from checkpoint
         model_cls = hydra.utils.get_class(cfg.model._target_) 
+        print("torch.cuda.device_count():", torch.cuda.device_count())
         pl = model_cls.load_from_checkpoint(
             cfg.path,
             config=cfg.model.config,
@@ -105,8 +106,10 @@ def main(cfg):
     else:
         # load weights for nn.Module
         model = pl.model
-        # print(model)
-        model.load_state_dict(torch.load(cfg.path))
+        if cfg.eval.load_weights_strict is not None:
+            model.load_state_dict(torch.load(cfg.path), strict=cfg.eval.load_weights_strict)
+        else:
+            model.load_state_dict(torch.load(cfg.path), strict=False)
 
     model.eval()
     # if torch.cuda.is_available():
