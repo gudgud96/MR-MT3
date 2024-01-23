@@ -14,6 +14,7 @@ lst = [
         "../../outputs/exp_segmemV2_prev_context=64/slakh_mt3_official/",
         "../../outputs/exp_segmemV2_prev_context=64_prevaug_frame=3/slakh_mt3_official/",
         "../../outputs/exp_segmemV2_prev_context=64_prevaug_frame=8/slakh_mt3_official/",
+        "../../outputs/exp_segmemV2_prev_context=64_prevaug_frame=3_MT3/slakh_mt3_official/",
     ]
 
 plt.figure(figsize=(20, 5))
