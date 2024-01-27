@@ -219,7 +219,7 @@ class T5SegMemV2WithPrev(T5SegMemV2):
 
         return lm_logits
 
-    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
+    def generate_2(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
         batch_size = inputs.shape[0]
         inputs_embeds = self.proj(inputs)
         encoder_outputs = self.encoder(
@@ -296,7 +296,7 @@ class T5SegMemV2WithPrev(T5SegMemV2):
         # print()
         return outs_lst
 
-    def generate_2(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
+    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
         batch_size = inputs.shape[0]
         inputs_embeds = self.proj(inputs)
         encoder_outputs = self.encoder(
