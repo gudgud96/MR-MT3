@@ -1,6 +1,11 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+# NOTE: this needs to be here, or else there will be a weird hanging issue when using TF spectrogram in PyTorch DDP training
+# see this issue: https://github.com/tensorflow/tensorflow/issues/60109
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
+
 import json
 import random
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -275,7 +280,10 @@ class SlakhDataset(Dataset):
         return output
 
     def _compute_spectrogram(self, ex):
-        samples = spectrograms.flatten_frames(ex['inputs'])
+        samples = spectrograms.flatten_frames(
+            ex['inputs'],
+            self.spectrogram_config.use_tf_spectral_ops
+        )
         ex['inputs'] = torch.from_numpy(np.array(spectrograms.compute_spectrogram(samples, self.spectrogram_config)))
         # add normalization
         ex['inputs'] = torch.clamp(ex['inputs'], min=MIN_LOG_MEL, max=MAX_LOG_MEL)
@@ -326,7 +334,7 @@ class SlakhDataset(Dataset):
         if random_length < 1:
             return row
         if self.is_deterministic:
-            start_length = 16
+            start_length = 0
         else:
             start_length = random.randint(0, random_length)
         for k in row.keys():
@@ -391,7 +399,7 @@ class SlakhDataset(Dataset):
         inputs, targets, frame_times, num_insts = [], [], [], []
         if len(rows) > self.num_rows_per_batch:
             if self.is_deterministic:
-                start_idx = 2
+                start_idx = 0
             else:
                 start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
             rows = rows[start_idx : start_idx + self.num_rows_per_batch]
@@ -558,7 +566,8 @@ if __name__ == '__main__':
         include_ties=True,
         mel_length=256,
         split_frame_length=256,
-        is_deterministic=False,
+        num_rows_per_batch=127,
+        is_deterministic=True,
         is_randomize_tokens=False
     )
     print("pitch", dataset.codec.event_type_range("pitch"))
@@ -569,6 +578,9 @@ if __name__ == '__main__':
     dl = DataLoader(dataset, batch_size=1, num_workers=0, collate_fn=collate_fn, shuffle=False)
     for idx, item in enumerate(dl):
         inputs, targets = item
-        print(idx, inputs.shape, targets[0][:100])
+        import numpy as np
+        print('targets', targets.shape)
+        np.save("mt3_0001_label.npy", targets.cpu().numpy())
+        # print(idx, inputs.shape, targets[0][:100])
         break
     
