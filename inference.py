@@ -105,7 +105,10 @@ class InferenceHandler:
         outputs = []
         outputs_raws = []
         for i in inputs:
-            samples = spectrograms.flatten_frames(i)
+            samples = spectrograms.flatten_frames(
+                i,
+                self.spectrogram_config.use_tf_spectral_ops,
+            )
             i = spectrograms.compute_spectrogram(
                 samples, self.spectrogram_config)
             raw_i = samples
@@ -193,7 +196,6 @@ class InferenceHandler:
                                             early_stopping=False, bad_words_ids=invalid_programs,
                                             use_cache=False,
                                             )
-                
                 result = self._postprocess_batch(result)
                 results.append(result)
             

@@ -369,7 +369,7 @@ def evaluate_main(
 
 
 if __name__ == "__main__":
-    lst = [
+    lst = [ 
         # "outputs/exp_segmemV2_prev_context=0/slakh_mt3_official/",
         # "outputs/exp_segmemV2_prev_context=32/slakh_mt3_official/",
         # "outputs/exp_segmemV2_prev_context=64/slakh_mt3_official/",
