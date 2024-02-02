@@ -196,9 +196,6 @@ class InferenceHandler:
                                             early_stopping=False, bad_words_ids=invalid_programs,
                                             use_cache=False,
                                             )
-                print('result', result, result.shape)
-                import numpy as np
-                np.save(f'../../../mt3_1876_{idx}.npy', result.cpu().numpy())
                 result = self._postprocess_batch(result)
                 results.append(result)
             
