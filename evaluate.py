@@ -369,15 +369,12 @@ def evaluate_main(
 
 
 if __name__ == "__main__":
-    lst = [
-        # "outputs/exp_baseline_librosa_ep800/",
+    lst = [ 
         # "outputs/exp_segmemV2_prev_context=0/slakh_mt3_official/",
         # "outputs/exp_segmemV2_prev_context=32/slakh_mt3_official/",
         # "outputs/exp_segmemV2_prev_context=64/slakh_mt3_official/",
         # "outputs/exp_segmemV2_prev_context=64_prevaug_frame=3/slakh_mt3_official/",
-        # "outputs/exp_segmemV2_prev_context=64_prevaug_frame=8/slakh_mt3_official/",
-        "outputs/exp_segmemV2_prev_context=0_MT3/slakh_mt3_official/",
-        "outputs/exp_segmemV2_prev_context=0_MT3_ep400/slakh_mt3_official/",
+        "outputs/exp_segmemV2_prev_context=64_prevaug_frame=8/slakh_mt3_official/",
     ]
     for k in lst:
         print(k)
@@ -385,7 +382,7 @@ if __name__ == "__main__":
             "Slakh",
             test_midi_dir=k,
             ground_truth_midi_dir="/data/slakh2100_flac_redux/test/",
-            # first_n=2
+            first_n=1
         )
 
         for key in sorted(list(scores)):
