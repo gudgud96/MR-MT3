@@ -370,18 +370,18 @@ def evaluate_main(
 
 if __name__ == "__main__":
     lst = [
-        # "outputs/exp_segmemV2_prev_context=0/slakh_mt3_official/",
+        "outputs/exp_segmemV2_prev_context=0/slakh_mt3_official/",
         # "outputs/exp_segmemV2_prev_context=32/slakh_mt3_official/",
         # "outputs/exp_segmemV2_prev_context=64/slakh_mt3_official/",
         # "outputs/exp_segmemV2_prev_context=64_prevaug_frame=3/slakh_mt3_official/",
-        "outputs/exp_segmemV2_prev_context=64_prevaug_frame=8/slakh_mt3_official/",
+        # "outputs/exp_segmemV2_prev_context=64_prevaug_frame=8/slakh_mt3_official/",
     ]
     for k in lst:
         print(k)
         scores = evaluate_main(
             "Slakh",
             test_midi_dir=k,
-            ground_truth_midi_dir="/data/slakh2100_flac_redux/test/",
+            ground_truth_midi_dir="/workspace/data/dataset/slakh2100_flac_redux/test/",
             first_n=1
         )
 
