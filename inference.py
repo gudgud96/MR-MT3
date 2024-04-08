@@ -6,8 +6,6 @@ from typing import List
 import numpy as np
 from tqdm import tqdm
 from models.t5 import T5ForConditionalGeneration, T5Config
-from models.t5_xl import T5WithXLDecoder, T5Config
-# from models.t5_xl_instrument import T5WithXLDecoder, T5Config
 import torch.nn as nn
 import torch
 from contrib import spectrograms, vocabularies, note_sequences, metrics_utils
@@ -27,7 +25,8 @@ class InferenceHandler:
         weight_path=None, 
         device=torch.device('cuda'),
         mel_norm=True,
-        contiguous_inference=False
+        contiguous_inference=False,
+        use_tf_spectral_ops=False,
     ) -> None:
         if model is None:
             # config_path = f'{root_path}/config.json'
@@ -35,13 +34,8 @@ class InferenceHandler:
             with open(config_path) as f:
                 config_dict = json.load(f)
             config = T5Config.from_dict(config_dict)
-
-            if "xl" in weight_path:
-                model: nn.Module = T5WithXLDecoder(config)
-                self.contiguous_inference = True
-            else:
-                model: nn.Module = T5ForConditionalGeneration(config)
-                self.contiguous_inference = False
+            model: nn.Module = T5ForConditionalGeneration(config)
+            self.contiguous_inference = False
             
             model.load_state_dict(torch.load(
                 weight_path, map_location='cpu'), strict=True)
@@ -54,6 +48,7 @@ class InferenceHandler:
 
         self.SAMPLE_RATE = 16000
         self.spectrogram_config = spectrograms.SpectrogramConfig()
+        self.spectrogram_config.use_tf_spectral_ops = use_tf_spectral_ops
         self.codec = vocabularies.build_codec(vocab_config=vocabularies.VocabularyConfig(
             num_velocity_bins=1))
         self.vocab = vocabularies.vocabulary_from_codec(self.codec)
@@ -103,7 +98,10 @@ class InferenceHandler:
         outputs = []
         outputs_raws = []
         for i in inputs:
-            samples = spectrograms.flatten_frames(i)
+            samples = spectrograms.flatten_frames(
+                i,
+                self.spectrogram_config.use_tf_spectral_ops,
+            )
             i = spectrograms.compute_spectrogram(
                 samples, self.spectrogram_config)
             raw_i = samples
@@ -158,6 +156,7 @@ class InferenceHandler:
         num_beams=1, 
         batch_size=5,
         max_length=1024,
+        verbose=False,
     ):
         """
         `contiguous_inference` is True only for XL models as context from previous chunk is needed.
@@ -178,7 +177,6 @@ class InferenceHandler:
                 inputs_tensor = torch.cat(inputs_tensor, dim=0)
                 frame_times = [torch.tensor(k) for k in frame_times]
                 frame_times = torch.cat(frame_times, dim=0)
-                print('inputs_tensor', inputs_tensor.shape, frame_times.shape)
                 inputs_tensor = [inputs_tensor]
                 frame_times = [frame_times]
 
@@ -191,7 +189,6 @@ class InferenceHandler:
                                             early_stopping=False, bad_words_ids=invalid_programs,
                                             use_cache=False,
                                             )
-                
                 result = self._postprocess_batch(result)
                 results.append(result)
             

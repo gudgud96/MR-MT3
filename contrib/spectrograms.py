@@ -16,8 +16,20 @@
 
 import dataclasses
 
+# for PyTorch spectrogram
+import torch
+from torchaudio.transforms import MelSpectrogram
+import librosa
+import numpy as np
+
+# this is to suppress a warning from torch melspectrogram
+import warnings
+warnings.filterwarnings("ignore")
+
+# for TF spectrogram
 from ddsp import spectral_ops
 import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 
 # defaults for spectrogram config
 DEFAULT_SAMPLE_RATE = 16000
@@ -35,6 +47,7 @@ class SpectrogramConfig:
     sample_rate: int = DEFAULT_SAMPLE_RATE
     hop_width: int = DEFAULT_HOP_WIDTH
     num_mel_bins: int = DEFAULT_NUM_MEL_BINS
+    use_tf_spectral_ops: bool = False
 
     @property
     def abbrev_str(self):
@@ -54,28 +67,77 @@ class SpectrogramConfig:
 
 def split_audio(samples, spectrogram_config):
     """Split audio into frames."""
-    return tf.signal.frame(
-        samples,
-        frame_length=spectrogram_config.hop_width,
-        frame_step=spectrogram_config.hop_width,
-        pad_end=True)
+    if spectrogram_config.use_tf_spectral_ops:
+        # print("split TF")
+        return tf.signal.frame(
+            samples,
+            frame_length=spectrogram_config.hop_width,
+            frame_step=spectrogram_config.hop_width,
+            pad_end=True)
+    else:
+        # print("split PT")
+        if samples.shape[0] % spectrogram_config.hop_width != 0:
+            samples = np.pad(
+                samples, 
+                (0, spectrogram_config.hop_width - samples.shape[0] % spectrogram_config.hop_width), 
+                'constant',
+                constant_values=0
+            )
+        return librosa.util.frame(
+            samples,
+            frame_length=spectrogram_config.hop_width,
+            hop_length=spectrogram_config.hop_width,
+            axis=-1).T
 
 
-def compute_spectrogram(samples, spectrogram_config):
-    """Compute a mel spectrogram."""
-    overlap = 1 - (spectrogram_config.hop_width / FFT_SIZE)
-    return spectral_ops.compute_logmel(
-        samples,
-        bins=spectrogram_config.num_mel_bins,
-        lo_hz=MEL_LO_HZ,
-        overlap=overlap,
-        fft_size=FFT_SIZE,
-        sample_rate=spectrogram_config.sample_rate)
+def compute_spectrogram(
+    samples, 
+    spectrogram_config,
+):
+    """
+    Compute a mel spectrogram.
+    Due to multiprocessing issues running TF and PyTorch together, we use librosa
+    and only keep `spectral_ops.compute_logmel` for evaluation purposes.
+    """
+    if spectrogram_config.use_tf_spectral_ops:
+        # NOTE: we only keep this for evaluating existing models
+        # This is because I find even with an equivalent PyTorch / librosa implementation 
+        # that gives close-enough results (melspec MAE ~ 2e-3), the model output is still affected badly.
+        # lazy load
+        # print("spec TF")
+        overlap = 1 - (spectrogram_config.hop_width / FFT_SIZE)
+        return spectral_ops.compute_logmel(
+            samples,
+            bins=spectrogram_config.num_mel_bins,
+            lo_hz=MEL_LO_HZ,
+            overlap=overlap,
+            fft_size=FFT_SIZE,
+            sample_rate=spectrogram_config.sample_rate)
+    else:
+        # print("spec PT")
+        transform = MelSpectrogram(
+            sample_rate=spectrogram_config.sample_rate,
+            n_fft=FFT_SIZE,
+            hop_length=spectrogram_config.hop_width,
+            n_mels=spectrogram_config.num_mel_bins,
+            f_min=MEL_LO_HZ,
+            power=1.0,
+        )
+        samples = torch.from_numpy(samples).float()
+        S = transform(samples)
+        S[S<0] = 0
+        S = torch.log(S + 1e-6)
+        return S.numpy().T
 
 
-def flatten_frames(frames):
+def flatten_frames(frames, use_tf_spectral_ops=False):
     """Convert frames back into a flat array of samples."""
-    return tf.reshape(frames, [-1])
+    if use_tf_spectral_ops:
+        # print("flatten TF")
+        return tf.reshape(frames, (-1,))
+    else:
+        # print("flatten PT")
+        return np.reshape(frames, (-1,))
 
 
 def input_depth(spectrogram_config):

@@ -9,11 +9,19 @@ path:
 event_length: 1024
 mel_length: 256
 num_rows_per_batch: 12
+split_frame_length: 256
+dataset_is_deterministic: False
+dataset_is_randomize_tokens: True
+dataset_use_tf_spectral_ops: False
+dataset_prev_augment_frames: 
+
+model_segmem_length: 4
 
 optim:
   lr: 2e-4
   warmup_steps: 64500
   num_epochs: ${num_epochs}
+  num_steps_per_epoch: 1289   # TODO: this is not good practice. Ideally we can get this from dataloader.
   min_lr: 1e-4
 
 grad_accum: 1
@@ -21,18 +29,19 @@ grad_accum: 1
 dataloader:
   train:
     batch_size: 1
-    num_workers: 12
+    num_workers: 2
   val:
     batch_size: 1
-    num_workers: 12  
+    num_workers: 1
 
 modelcheckpoint:
   monitor: 'val_loss'
   mode: 'min'
   save_last: True
-  save_top_k: 5
+  save_top_k: -1
   save_weights_only: False
-  filename: '{epoch}-{step}-{val_loss:.4f}'
+  every_n_epochs: 10
+  filename: '{epoch}-{val_loss:.4f}'
 
 trainer:
   precision: 32
@@ -43,6 +52,21 @@ trainer:
   log_every_n_steps: 100
   strategy: "ddp_find_unused_parameters_false"
   devices: ${devices}
+  check_val_every_n_epoch: 5
+  # deterministic: True
+
+eval:
+  is_sanity_check: False
+  eval_first_n_examples: 
+  eval_after_num_epoch: 400
+  eval_per_epoch: 1
+  eval_dataset:
+  exp_tag_name: 
+  audio_dir:
+  midi_dir:
+  contiguous_inference:
+  batch_size: 8
+  use_tf_spectral_ops: False
 
 defaults:
   - model: MT3Net

@@ -275,11 +275,15 @@ def evaluate_main(
     dataset_name,   # "Slakh" or "ComMU"
     test_midi_dir,
     ground_truth_midi_dir,
-    enable_instrument_eval=False
+    enable_instrument_eval=False,
+    first_n=None,
 ):
     if dataset_name == "Slakh":
         dir = sorted(glob.glob(f"{test_midi_dir}/*/mix.mid"))
         dir2 = [k.replace(test_midi_dir, ground_truth_midi_dir).replace("/mix.mid", "/all_src_v2.mid") for k in dir]
+        if first_n:
+            dir = dir[:first_n]
+            dir2 = dir2[:first_n]
         fnames = zip(dir2, dir)
     
     elif dataset_name == "ComMU":
@@ -328,9 +332,7 @@ def evaluate_main(
                 
 
     mean_scores = {k: np.mean(v) for k, v in scores.items() if k != "F1 by program"}
-    for key in sorted(list(mean_scores)):
-        print("{}: {:.4}".format(key, mean_scores[key]))
-
+    
     if enable_instrument_eval:
         print("====")
         program_f1_dict = {}
@@ -362,11 +364,28 @@ def evaluate_main(
                 print("{}: {:.4}".format(d[key], program_f1_dict[key]))
             elif key * 8 in program_f1_dict:
                 print("{}: {:.4}".format(d[key], program_f1_dict[key * 8]))
+    
+    return mean_scores
 
 
 if __name__ == "__main__":
-    evaluate_main(
-        "Slakh",
-        test_midi_dir="outputs/2023-11-07/22-10-36/commu_mt3_on_slakh/",
-        ground_truth_midi_dir="/data/slakh2100_flac_redux/test/",
-    )
+    lst = [ 
+        # "outputs/exp_segmemV2_prev_context=0/slakh_mt3_official/",
+        # "outputs/exp_segmemV2_prev_context=32/slakh_mt3_official/",
+        # "outputs/exp_segmemV2_prev_context=64/slakh_mt3_official/",
+        # "outputs/exp_segmemV2_prev_context=64_prevaug_frame=3/slakh_mt3_official/",
+        "outputs/exp_segmemV2_prev_context=64_prevaug_frame=8/slakh_mt3_official/",
+    ]
+    for k in lst:
+        print(k)
+        scores = evaluate_main(
+            "Slakh",
+            test_midi_dir=k,
+            ground_truth_midi_dir="/data/slakh2100_flac_redux/test/",
+            first_n=1
+        )
+
+        for key in sorted(list(scores)):
+            if "F1" in key:
+                print("{}: {:.4}".format(key, scores[key]))
+        print("====")

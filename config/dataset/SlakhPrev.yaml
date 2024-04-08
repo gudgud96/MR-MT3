@@ -1,5 +1,5 @@
 train:
-  _target_: dataset.dataset_2_random.SlakhDataset # choosing which data class to use
+  _target_: dataset.dataset_2_random_segmem_prev.SlakhDatasetWithPrevSegmem # choosing which data class to use
   root_dir: "/data/slakh2100_flac_redux/train"
   mel_length: ${mel_length}
   event_length: ${event_length}
@@ -12,7 +12,7 @@ train:
   is_randomize_tokens: ${dataset_is_randomize_tokens}
   use_tf_spectral_ops: ${dataset_use_tf_spectral_ops}
 val:
-  _target_: dataset.dataset_2_random.SlakhDataset # choosing which data class to use
+  _target_: dataset.dataset_2_random_segmem_prev.SlakhDatasetWithPrevSegmem # choosing which data class to use
   root_dir: "/data/slakh2100_flac_redux/validation/"
   mel_length: ${mel_length}
   event_length: ${event_length}
@@ -26,4 +26,4 @@ val:
   use_tf_spectral_ops: ${dataset_use_tf_spectral_ops}
 test:
   root_dir: "/data/slakh2100_flac_redux/test"
-collate_fn: dataset.dataset_2_random.collate_fn
+collate_fn: dataset.dataset_2_random_segmem_prev.collate_fn

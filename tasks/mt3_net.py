@@ -14,10 +14,16 @@ class MT3Net(pl.LightningModule):
         self.config = config
         self.optim_cfg = optim_cfg
         T5config = T5Config.from_dict(OmegaConf.to_container(self.config))
-        self.model: nn.Module = T5ForConditionalGeneration(T5config)
+        self.model: nn.Module = T5ForConditionalGeneration(
+            T5config
+        )
 
     def forward(self, *args, **kwargs):
         return self.model.forward(*args, **kwargs)
+    
+    # def on_train_batch_start(self, *args, **kwargs):
+    #     self.model.train()
+    #     pl.seed_everything(365)
 
     def training_step(self, batch, batch_idx):
         inputs, targets = batch

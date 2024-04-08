@@ -10,4 +10,5 @@ tensorflow==2.11
 tensorflow-text==2.11
 protobuf==3.20
 numpy==1.22
+hydra-core==1.2.0
 typing_extensions

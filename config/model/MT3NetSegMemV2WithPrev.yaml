@@ -1,4 +1,4 @@
-_target_: tasks.mt3_net_pix2seq.MT3NetPix2Seq
+_target_: tasks.mt3_net_segmem_v2_with_prev.MT3NetSegMemV2WithPrev
 config: # a hacky way to make this config works for T5 class
   architectures:
     - T5ForConditionalGeneration
@@ -23,3 +23,6 @@ config: # a hacky way to make this config works for T5 class
   vocab_size: 1536
   encoder_vocab_size: 1024
   xl_context_length: 2048
+  segmem_num_layers: 1
+  segmem_length: ${model_segmem_length}
+  use_cache: False
