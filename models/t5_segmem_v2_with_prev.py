@@ -110,6 +110,11 @@ class T5SegMemV2WithPrev(T5SegMemV2):
             # get decoder inputs from shifting lm labels to the right
             decoder_input_ids = self._shift_right(labels)
         
+        # NOTE: T5SegMemV2WithPrev improves from T5SegMemV2.
+        # Using `SlakhPrevDataset`, for each {b}-th element, we also pass in their corresponding "prior segment"
+        # and use that to extract the memory block.
+        # This does incur more GPU RAM, because we need to store both `targets` and `targets_prev`.
+
         assert self.config.pad_token_id == 0
         targets_prev.masked_fill_(targets_prev == -100, self.config.pad_token_id)
 
@@ -121,7 +126,6 @@ class T5SegMemV2WithPrev(T5SegMemV2):
             hidden_states,
             segmem_embeds_agg, 
         ], dim=1)
-        # print('hidden_states', hidden_states.shape)
 
         # Decode
         decoder_outputs = self.decoder(
@@ -290,66 +294,4 @@ class T5SegMemV2WithPrev(T5SegMemV2):
             segmem_ids = decoder_tokens
         
         outs_lst = torch.cat(outs_lst, dim=0)
-        # print('outs_lst')
-        # for elem in outs_lst[0]:
-        #     print(elem.item(), end=",")
-        # print()
         return outs_lst
-
-    def generate_2(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
-        batch_size = inputs.shape[0]
-        inputs_embeds = self.proj(inputs)
-        encoder_outputs = self.encoder(
-            inputs_embeds=inputs_embeds,
-            return_dict=True
-        )
-        hidden_states = encoder_outputs[0]
-
-        decoder_input_ids_start = torch.ones((batch_size, 1), dtype=torch.long, device=self.device) * \
-                                    self.config.decoder_start_token_id
-        
-        # keep track of which sequences are already finished
-        unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=self.device)
-        eos_token_id_tensor = torch.tensor(self.config.eos_token_id).to(self.device)
-        
-        for l in range(max_length):
-            decoder_outputs = self.decoder(
-                input_ids=decoder_input_ids_start,
-                encoder_hidden_states=hidden_states,
-                # output_hidden_states=output_hidden_states,
-                return_dict=True,
-                use_cache=False,
-            )
-
-            # handle output hidden states
-            # if output_hidden_states:
-            #     hidden_states = decoder_outputs.hidden_states # (num_layers + 1, batch_size, 1, hidden_size)
-            #     print('hidden states', hidden_states[0].shape)
-            #     hidden_states = [torch.cat(layer, dim=0) for layer in hidden_states]
-            #     print('dec hidden states', hidden_states[0].shape)
-            #     hidden_states = torch.cat(hidden_states, dim=0)
-            #     print('dec hidden states', hidden_states.shape)
-            
-            sequence_output = decoder_outputs[0]
-            lm_logits = self.lm_head(sequence_output)
-            next_tokens = torch.argmax(lm_logits[:, -1, :].unsqueeze(1), dim=-1)
-
-            next_tokens = next_tokens * unfinished_sequences.unsqueeze(-1) + self.config.pad_token_id * (1 - unfinished_sequences.unsqueeze(-1))
-            eos_indices = torch.where(next_tokens == self.config.eos_token_id)[0]
-            unfinished_sequences[eos_indices] = 0
-            decoder_input_ids_start = torch.cat([decoder_input_ids_start, next_tokens], dim=-1)
-
-            # stop when each sentence is finished
-            if unfinished_sequences.max() == 0:
-                break
-            
-            # print(l, decoder_input_ids_start.shape)
-        
-        # print('decoder_input_ids_start')
-        # for elem in decoder_input_ids_start[0]:
-        #     print(elem.item(), end=",")
-        # print()
-        if output_hidden_states:
-            return decoder_input_ids_start, hidden_states
-        else:
-            return decoder_input_ids_start

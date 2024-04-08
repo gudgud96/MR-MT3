@@ -6,8 +6,6 @@ from typing import List
 import numpy as np
 from tqdm import tqdm
 from models.t5 import T5ForConditionalGeneration, T5Config
-from models.t5_xl import T5WithXLDecoder, T5Config
-# from models.t5_xl_instrument import T5WithXLDecoder, T5Config
 import torch.nn as nn
 import torch
 from contrib import spectrograms, vocabularies, note_sequences, metrics_utils
@@ -36,13 +34,8 @@ class InferenceHandler:
             with open(config_path) as f:
                 config_dict = json.load(f)
             config = T5Config.from_dict(config_dict)
-
-            if "xl" in weight_path:
-                model: nn.Module = T5WithXLDecoder(config)
-                self.contiguous_inference = True
-            else:
-                model: nn.Module = T5ForConditionalGeneration(config)
-                self.contiguous_inference = False
+            model: nn.Module = T5ForConditionalGeneration(config)
+            self.contiguous_inference = False
             
             model.load_state_dict(torch.load(
                 weight_path, map_location='cpu'), strict=True)

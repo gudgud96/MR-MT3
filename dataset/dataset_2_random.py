@@ -15,7 +15,6 @@ import note_seq
 from glob import glob
 from contrib import event_codec, note_sequences, spectrograms, vocabularies, run_length_encoding, metrics_utils
 from contrib.preprocessor import slakh_class_to_program_and_is_drum, add_track_to_notesequence, PitchBendError
-import soundfile as sf
 
 MIN_LOG_MEL = -12
 MAX_LOG_MEL = 5
@@ -388,13 +387,9 @@ class SlakhDataset(Dataset):
         
         row = self._tokenize(ns, audio, inst_names)
 
-        # NOTE: by default, this is self._split_frame(row, length=2000)
-        # this does not guarantee the chunks in `rows` to be contiguous.
-        # if we need to ensure that the chunks in `rows` to be contiguous, use:
+        # NOTE: if we need to ensure that the chunks in `rows` to be contiguous, 
+        # use `length = self.mel_length` in `_split_frame`:
         rows = self._split_frame(row, length=self.split_frame_length)
-        # rows = self._split_frame(row)
-
-        # print('self.is_deterministic', self.is_deterministic)
         
         inputs, targets, frame_times, num_insts = [], [], [], []
         if len(rows) > self.num_rows_per_batch:
@@ -404,16 +399,10 @@ class SlakhDataset(Dataset):
                 start_idx = random.randint(0, len(rows) - self.num_rows_per_batch)
             rows = rows[start_idx : start_idx + self.num_rows_per_batch]
         
-        predictions = []
-        # wavs = []
-        fake_start = None
         for j, row in enumerate(rows):
             row = self._random_chunk(row)
             row = self._extract_target_sequence_with_indices(row, self.tie_token)
             row = self._run_length_encode_shifts(row)
-            
-            # wavs.append(row["inputs"].reshape(-1,))
-            # sf.write(f"test_{j}.wav", row["inputs"].reshape(-1,), 16000, "PCM_24")
 
             row = self._compute_spectrogram(row)
 
@@ -423,49 +412,10 @@ class SlakhDataset(Dataset):
                 t = np.array([self.token_to_idx(k) for k in t])
                 t = self._remove_redundant_tokens(t)
                 row["targets"] = t
-            
-            # print(j, [self.get_token_name(t) for t in row["targets"]])
-            
+                        
             row = self._pad_length(row)
             inputs.append(row["inputs"])
             targets.append(row["targets"])   
-
-            # ========== for reconstructing the MIDI from events =========== #
-            # result = row["targets"]
-            # EOS_TOKEN_ID = 1    # TODO: this is a hack!
-            # after_eos = torch.cumsum(
-            #     (result == EOS_TOKEN_ID).float(), dim=-1
-            # )
-            # result -= self.vocab.num_special_tokens()
-            # result = torch.where(after_eos.bool(), -1, result)
-
-            # print("start_times", row["input_times"][0])
-            # if fake_start is None:
-            #     fake_start = row["input_times"][0]
-            # # predictions = []
-            # predictions.append({
-            #     'est_tokens': result.cpu().detach().numpy(),    # has to be numpy here, or else problematic
-            #     # 'start_time': row["input_times"][0] - fake_start,
-            #     'start_time': j * 2.048,
-            #     # 'start_time': 0,
-            #     'raw_inputs': []
-            # })
-
-            # # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
-            # # result = metrics_utils.event_predictions_to_ns(
-            # #     predictions, codec=self.codec, encoding_spec=encoding_spec)
-            # # note_seq.sequence_proto_to_midi_file(result['est_ns'], f"test_out_{j}.mid")   
-            # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
-
-             # ========== for reconstructing the MIDI from events =========== #
-        
-        # ========== for reconstructing the MIDI from events =========== #
-        # encoding_spec = note_sequences.NoteEncodingWithTiesSpec
-        # result = metrics_utils.event_predictions_to_ns(
-        #     predictions, codec=self.codec, encoding_spec=encoding_spec)
-        # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
-        # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
-        # ========== for reconstructing the MIDI from events =========== #  
 
         return torch.stack(inputs), torch.stack(targets)
     
@@ -546,16 +496,6 @@ class SlakhDataset(Dataset):
 def collate_fn(lst):
     inputs = torch.cat([k[0] for k in lst])
     targets = torch.cat([k[1] for k in lst])
-    # num_insts = torch.cat([k[2] for k in lst])
-
-    # add random shuffling here
-    # indices = np.arange(inputs.shape[0])
-    # np.random.shuffle(indices)
-    # indices = torch.from_numpy(indices)
-    # inputs = inputs[indices]
-    # targets = targets[indices]
-    # num_insts = num_insts[indices]
-
     return inputs, targets
 
 if __name__ == '__main__':

@@ -18,7 +18,6 @@ import os
 MIN_LOG_MEL = -12
 MAX_LOG_MEL = 5
 
-# TODO: duplicated code...ideally, we should have a base class for all token-based transcription datasets
 
 class ComMUDataset(Dataset):
 
@@ -369,15 +368,14 @@ class ComMUDataset(Dataset):
             row = self._extract_target_sequence_with_indices(row, self.tie_token)
             row = self._run_length_encode_shifts(row)
             
+            # ========== for reconstructing the MIDI from events =========== #
             # wavs.append(row["inputs"].reshape(-1,))
             # sf.write(f"test_{j}.wav", row["inputs"].reshape(-1,), 16000, "PCM_24")
+            # ========== for reconstructing the MIDI from events =========== #
 
             row = self._compute_spectrogram(row)
 
             # -- random order augmentation --
-            # If turned on, comment out `is_redundant` code in `run_length_encoding`
-            # print("=======")
-            # print(j, [self.get_token_name(t) for t in row["targets"]])
             t = self.randomize_tokens([self.get_token_name(t) for t in row["targets"]])
             t = np.array([self.token_to_idx(k) for k in t])
             t = self._remove_redundant_tokens(t)
@@ -422,7 +420,6 @@ class ComMUDataset(Dataset):
         # note_seq.sequence_proto_to_midi_file(result['est_ns'], "test_out.mid")   
         # sf.write(f"test_out.wav", np.concatenate(wavs), 16000, "PCM_24")
         # ========== for reconstructing the MIDI from events =========== #  
-        # num_insts = np.stack(num_insts)
 
         return torch.stack(inputs), torch.stack(targets)
     
