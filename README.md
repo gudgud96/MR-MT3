@@ -2,7 +2,7 @@
 
 Code accompanying paper: [MR-MT3: Memory Retaining Multi-Track Music Transcription to Mitigate Instrument Leakage](https://arxiv.org/pdf/2403.10024.pdf).
 
-### Setup steps
+## Setup steps
 
 First, you need to install requirements:
 ```
@@ -12,7 +12,7 @@ Make sure `pip` is up-to-date, which should be able to [reduce backtracking](htt
 
 Next, you need to download the required datasets and postprocess them:
 
-#### For Slakh
+### For Slakh
 
 1. Re-sample Slakh `.flac` to 16kHz - `python3 resample.py`.
 
@@ -20,25 +20,25 @@ Next, you need to download the required datasets and postprocess them:
 
 3. `python3 tools/generate_inst_names.py`
 
-#### For ComMU
+### For ComMU
 
 1. Download ComMU dataset - `https://github.com/POZAlabs/ComMU-code/tree/master/dataset`
 
 2. `cd scripts/commu/` -> `./process_commu_dataset.sh`
 
-#### For NSynth
+### For NSynth
 
 1. Download NSynth dataset validation split.
 
 2. `cd scripts/nsynth/` -> `python3 convert_nsynth_json_to_midi.py`
 
 
-### Training
+## Training
 
 Refer to `train.sh` for a list of train commands corresponding to all of our experiments.
 
 
-### Evaluation
+## Evaluation
 
 Refer to `test.sh`, for a list of test commands corresponding to all of our experiments.
 
@@ -47,5 +47,19 @@ Basically, each command runs `test.py` that:
 - compute multi-instrument F1 score w.r.t. the ground truth MIDI.
 
 
-### License
+## License
 MIT
+
+## Citations
+If you find our research useful, kindly cite us at:
+```
+@article{tan2024mr,
+  title={MR-MT3: Memory Retaining Multi-Track Music Transcription to Mitigate Instrument Leakage},
+  author={Tan, Hao Hao and Cheuk, Kin Wai and Cho, Taemin and Liao, Wei-Hsiang and Mitsufuji, Yuki},
+  journal={arXiv preprint arXiv:2403.10024},
+  year={2024}
+}
+```
+
+## Credits
+Huge shoutout to [@kunato](https://github.com/kunato) as we largely based our initial MT3 experiments on his implementation - [https://github.com/kunato/mt3-pytorch](https://github.com/kunato/mt3-pytorch).
