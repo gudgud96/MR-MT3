@@ -37,6 +37,8 @@ Next, you need to download the required datasets and postprocess them:
 
 Refer to `train.sh` for a list of train commands corresponding to all of our experiments.
 
+You can download our pretrained models at: [TBA]().
+
 
 ## Evaluation
 
