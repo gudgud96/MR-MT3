@@ -1,4 +1,4 @@
-## MR-MT3
+# MR-MT3
 
 Code accompanying paper: [MR-MT3: Memory Retaining Multi-Track Music Transcription to Mitigate Instrument Leakage](https://arxiv.org/pdf/2403.10024.pdf).
 
