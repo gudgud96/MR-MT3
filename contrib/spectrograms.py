@@ -89,6 +89,18 @@ def split_audio(samples, spectrogram_config):
             hop_length=spectrogram_config.hop_width,
             axis=-1).T
 
+def pad_end(samples, n_fft, hop_size):
+    """Pad the waveform to ensure that all samples are processed."""
+    n_samples = samples.shape[-1]
+    # using double negatives to round up
+    n_frames = -(-n_samples // hop_size)
+    pad_samples = max(0, n_fft + hop_size * (n_frames - 1) - n_samples)
+    return torch.nn.functional.pad(samples, (0, pad_samples))
+
+def safe_log(x, eps=1e-5):
+    """Avoid taking the log of a non-positive number."""
+    safe_x = torch.where(x <= 0.0, eps, x)
+    return torch.log(safe_x)
 
 def compute_spectrogram(
     samples, 
@@ -121,12 +133,15 @@ def compute_spectrogram(
             hop_length=spectrogram_config.hop_width,
             n_mels=spectrogram_config.num_mel_bins,
             f_min=MEL_LO_HZ,
+            f_max=7600,
             power=1.0,
+            center=False
         )
         samples = torch.from_numpy(samples).float()
-        S = transform(samples)
-        S[S<0] = 0
-        S = torch.log(S + 1e-6)
+        S = transform(pad_end(samples, FFT_SIZE, spectrogram_config.hop_width))
+        S = safe_log(S)
+        # S[S<0] = 0
+        # S = torch.log(S + 1e-6)
         return S.numpy().T
 
 
