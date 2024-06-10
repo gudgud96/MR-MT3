@@ -6,13 +6,12 @@ import torch.nn as nn
 from transformers import T5Config
 from models.t5 import T5ForConditionalGeneration
 from utils import get_cosine_schedule_with_warmup
+from tasks.mt3_base import MT3Base
 
-class MT3Net(pl.LightningModule):
 
-    def __init__(self, config, optim_cfg):
-        super().__init__()
-        self.config = config
-        self.optim_cfg = optim_cfg
+class MT3Net(MT3Base):
+    def __init__(self, config, optim_cfg, eval_cfg=None):
+        super().__init__(config, optim_cfg, eval_cfg=eval_cfg)
         T5config = T5Config.from_dict(OmegaConf.to_container(self.config))
         self.model: nn.Module = T5ForConditionalGeneration(
             T5config
@@ -73,12 +72,9 @@ class MT3Net(pl.LightningModule):
         # return AdamW(self.model.parameters(), self.config.lr)
 
 
-class MT3NetWeightedLoss(pl.LightningModule):
-
-    def __init__(self, config, optim_cfg):
-        super().__init__()
-        self.config = config
-        self.optim_cfg = optim_cfg
+class MT3NetWeightedLoss(MT3Base):
+    def __init__(self, config, optim_cfg, eval_cfg=None):
+        super().__init__(config, optim_cfg, eval_cfg=eval_cfg)
         T5config = T5Config.from_dict(OmegaConf.to_container(self.config))
         self.model: nn.Module = T5ForConditionalGeneration(T5config)
 

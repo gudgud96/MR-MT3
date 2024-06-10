@@ -24,7 +24,11 @@ def main(cfg):
     # set seed to ensure reproducibility
     pl.seed_everything(cfg.seed)
 
-    model = hydra.utils.instantiate(cfg.model, optim_cfg=cfg.optim)
+    model = hydra.utils.instantiate(
+        cfg.model, 
+        optim_cfg=cfg.optim,
+        eval_cfg=cfg.eval    
+    )
     logger = TensorBoardLogger(save_dir='.',
                                name=f"{cfg.model_type}_{cfg.dataset_type}")
     
