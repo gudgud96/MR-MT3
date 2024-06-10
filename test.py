@@ -10,8 +10,6 @@ import librosa
 import hydra
 import numpy as np
 from evaluate import evaluate_main
-from tasks.mt3_net import MT3Net
-from tasks.mt3_net_segmem import MT3NetSegMem
 
 
 def get_scores(
