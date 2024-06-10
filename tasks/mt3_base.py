@@ -40,9 +40,8 @@ class MT3Base(pl.LightningModule):
                     ground_truth_midi_dir=self.eval_cfg.midi_dir,
                     verbose=False
                 )
-                print(scores)
 
-                self.log('val_f1_flat', scores['Onset F1'], on_step=False, on_epoch=True)
+                self.log('val_f1_flat', scores['Onset F1'], on_step=False, on_epoch=True, prog_bar=True)
                 self.log('val_f1_midi_class', scores['Onset + program F1 (midi_class)'], on_step=False, on_epoch=True)
                 self.log('val_f1_full', scores['Onset + program F1 (full)'], on_step=False, on_epoch=True)
     
