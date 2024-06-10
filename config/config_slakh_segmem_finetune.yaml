@@ -57,13 +57,13 @@ trainer:
 
 eval:
   is_sanity_check: False
-  eval_first_n_examples: 
+  eval_first_n_examples: 3
   eval_after_num_epoch: 400
-  eval_per_epoch: 1
-  eval_dataset:
-  exp_tag_name: 
-  audio_dir:
-  midi_dir:
+  eval_per_epoch: 10
+  eval_dataset: "Slakh"
+  exp_tag_name: "val_midis"
+  audio_dir: "/data/slakh2100_flac_redux/validation/*/mix_16k.wav"
+  midi_dir: "/data/slakh2100_flac_redux/validation/"
   contiguous_inference:
   batch_size: 8
   use_tf_spectral_ops: False
