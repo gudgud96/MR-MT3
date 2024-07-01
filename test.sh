@@ -7,11 +7,12 @@ python3 test.py \
     eval.eval_dataset="Slakh" \
     eval.exp_tag_name="slakh_mt3_official" \
     eval.audio_dir="/data/slakh2100_flac_redux/test/*/mix_16k.wav" \
+    eval.midi_dir="/data/slakh2100_flac_redux/test/" \
     hydra/job_logging=disabled \
     eval.is_sanity_check=True   \
     eval.eval_first_n_examples=1 \
     eval.contiguous_inference=False \
-    eval.use_tf_spectral_ops=True \
+    eval.use_tf_spectral_ops=False \
     +eval.load_weights_strict=False \
     # eval.eval_first_n_examples=1 \
 
@@ -27,6 +28,7 @@ python3 test.py \
     eval.eval_dataset="Slakh" \
     eval.exp_tag_name="slakh_mt3_official" \
     eval.audio_dir="/data/slakh2100_flac_redux/test/*/mix_16k.wav" \
+    eval.midi_dir="/data/slakh2100_flac_redux/test/" \
     hydra/job_logging=disabled \
     eval.is_sanity_check=True   \
     eval.contiguous_inference=True \
@@ -44,6 +46,7 @@ python3 test.py \
     eval.eval_dataset="Slakh" \
     eval.exp_tag_name="slakh_mt3_official" \
     eval.audio_dir="/data/slakh2100_flac_redux/test/*/mix_16k.wav" \
+    eval.midi_dir="/data/slakh2100_flac_redux/test/" \
     hydra/job_logging=disabled \
     eval.is_sanity_check=True   \
     eval.contiguous_inference=True \
@@ -61,6 +64,7 @@ python3 test.py \
     eval.eval_dataset="Slakh" \
     eval.exp_tag_name="slakh_mt3_official" \
     eval.audio_dir="/data/slakh2100_flac_redux/test/*/mix_16k.wav" \
+    eval.midi_dir="/data/slakh2100_flac_redux/test/" \
     hydra/job_logging=disabled \
     eval.is_sanity_check=True   \
     eval.contiguous_inference=True \
@@ -78,6 +82,7 @@ python3 test.py \
     eval.eval_dataset="Slakh" \
     eval.exp_tag_name="slakh_mt3_official" \
     eval.audio_dir="/data/slakh2100_flac_redux/test/*/mix_16k.wav" \
+    eval.midi_dir="/data/slakh2100_flac_redux/test/" \
     hydra/job_logging=disabled \
     eval.is_sanity_check=True   \
     eval.contiguous_inference=True \
@@ -95,6 +100,7 @@ python3 test.py \
     eval.eval_dataset="Slakh" \
     eval.exp_tag_name="slakh_mt3_official" \
     eval.audio_dir="/data/slakh2100_flac_redux/test/*/mix_16k.wav" \
+    eval.midi_dir="/data/slakh2100_flac_redux/test/" \
     hydra/job_logging=disabled \
     eval.is_sanity_check=True   \
     eval.contiguous_inference=True \
