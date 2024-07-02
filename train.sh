@@ -82,3 +82,18 @@ HYDRA_FULL_ERROR=1 OMP_NUM_THREADS=1 python3 train.py \
     eval.eval_first_n_examples=3 \
     eval.eval_per_epoch=10 \
     eval.contiguous_inference=True \
+
+#  ======= train vanilla Transformer baseline ======= #
+#  This experiment trains vanilla Transformer from scratch
+HYDRA_FULL_ERROR=1 OMP_NUM_THREADS=1 python3 train.py \
+    --config-path="config" \
+    --config-name="config_slakh_f1_0.65" \
+    devices=[0,1] \
+    hydra/job_logging=disabled \
+    model="VanillaTransformerNet" \
+    dataset="Slakh" \
+    split_frame_length=2000 \
+    eval.eval_after_num_epoch=400 \
+    eval.eval_first_n_examples=3 \
+    eval.eval_per_epoch=10 \
+    eval.contiguous_inference=False \
