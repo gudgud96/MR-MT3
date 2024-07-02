@@ -25,6 +25,23 @@ class VanillaTransformer(nn.Module):
         self.proj = nn.Linear(config.d_model, config.d_model, bias=False)
         self.decoder_embed_tokens = nn.Embedding(config.vocab_size, config.d_model)
         self.pos_emb = FixedPositionalEmbedding(config.d_model)
+    
+    def encode(self, src: Tensor):
+        src_emb = self.proj(src)
+        src_pos_emb = self.pos_emb(src_emb.shape[1])
+        src_emb += src_pos_emb
+        return self.transformer.encoder(src_emb, None)
+
+    def decode(self, tgt: Tensor, memory: Tensor):
+        # we most likely do not need a tgt_mask during decoding
+        # because there will not be padding tokens
+        tgt_emb = self.decoder_embed_tokens(tgt)
+        tgt_pos_emb = self.pos_emb(tgt_emb.shape[1])
+        tgt_emb += tgt_pos_emb
+
+        return self.transformer.decoder(
+            tgt_emb, memory, None
+        )
 
     def forward(
         self,
@@ -34,8 +51,14 @@ class VanillaTransformer(nn.Module):
         tgt_in = self._shift_right(tgt)
         tgt_mask, tgt_padding_mask = self.create_tgt_mask(tgt_in)
 
-        src_emb = self.pos_emb(self.proj(src))
-        tgt_emb = self.pos_emb(self.decoder_embed_tokens(tgt_in))
+        # src is a spectrogram, so we use nn.Linear here
+        src_emb = self.proj(src)
+        src_pos_emb = self.pos_emb(src_emb.shape[1])
+        src_emb += src_pos_emb
+
+        tgt_emb = self.decoder_embed_tokens(tgt_in)
+        tgt_pos_emb = self.pos_emb(tgt_emb.shape[1])
+        tgt_emb += tgt_pos_emb
 
         outs = self.transformer(
             src=src_emb,
@@ -52,6 +75,8 @@ class VanillaTransformer(nn.Module):
         return self.lm_head(outs)
     
     def _shift_right(self, input_ids):
+        # NOTE: do note in this case our decoder_start_token_id is 2
+        # whereas in T5 it is 0, which is the same as pad_token_id
         decoder_start_token_id = self.config.decoder_start_token_id
         pad_token_id = self.config.pad_token_id
 
@@ -75,6 +100,38 @@ class VanillaTransformer(nn.Module):
         tgt_seq_len = tgt.shape[1]
 
         tgt_mask = self.generate_square_subsequent_mask(tgt_seq_len)
+        tgt_mask = tgt_mask.to(tgt.device)
         tgt_padding_mask = tgt == self.config.pad_token_id
 
         return tgt_mask, tgt_padding_mask
+
+    def generate(self, inputs, max_length=1024, output_hidden_states=False, **kwargs):
+        batch_size = inputs.shape[0]
+        hidden_states = self.encode(inputs)
+
+        decoder_input_ids_start = torch.ones((batch_size, 1), dtype=torch.long, device=inputs.device) * \
+                                    self.config.decoder_start_token_id
+        
+        # keep track of which sequences are already finished
+        unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=inputs.device)
+        eos_token_id_tensor = torch.tensor(self.config.eos_token_id).to(inputs.device)
+        
+        for l in range(max_length):
+            sequence_output = self.decode(
+                tgt=decoder_input_ids_start,
+                memory=hidden_states,
+            )
+            
+            lm_logits = self.lm_head(sequence_output)
+            next_tokens = torch.argmax(lm_logits[:, -1, :].unsqueeze(1), dim=-1)
+
+            next_tokens = next_tokens * unfinished_sequences.unsqueeze(-1) + self.config.pad_token_id * (1 - unfinished_sequences.unsqueeze(-1))
+            eos_indices = torch.where(next_tokens == self.config.eos_token_id)[0]
+            unfinished_sequences[eos_indices] = 0
+            decoder_input_ids_start = torch.cat([decoder_input_ids_start, next_tokens], dim=-1)
+
+            # stop when each sentence is finished
+            if unfinished_sequences.max() == 0:
+                break
+                    
+        return decoder_input_ids_start

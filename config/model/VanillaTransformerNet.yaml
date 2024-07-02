@@ -3,7 +3,7 @@ config: # a hacky way to make this config works for T5 class
   d_ff: 2048
   d_kv: 64
   d_model: 512
-  decoder_start_token_id: 0
+  decoder_start_token_id: 2   # T5-MT3 uses 0, which is the same as pad_id. I suspect they don't use key_padding_mask.
   dropout_rate: 0.1
   pad_token_id: 0
   eos_token_id: 1
