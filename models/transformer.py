@@ -32,7 +32,7 @@ class VanillaTransformer(nn.Module):
         src_emb += src_pos_emb
         return self.transformer.encoder(src_emb, None)
 
-    def decode(self, tgt: Tensor, memory: Tensor):
+    def decode(self, tgt: Tensor, memory: Tensor, tgt_mask: Tensor):
         # we most likely do not need a tgt_mask during decoding
         # because there will not be padding tokens
         tgt_emb = self.decoder_embed_tokens(tgt)
@@ -40,7 +40,7 @@ class VanillaTransformer(nn.Module):
         tgt_emb += tgt_pos_emb
 
         return self.transformer.decoder(
-            tgt_emb, memory, None
+            tgt_emb, memory, tgt_mask
         )
 
     def forward(
@@ -117,9 +117,14 @@ class VanillaTransformer(nn.Module):
         eos_token_id_tensor = torch.tensor(self.config.eos_token_id).to(inputs.device)
         
         for l in range(max_length):
+            # generate causal mask for autoregressive decoding
+            tgt_mask = (self.generate_square_subsequent_mask(decoder_input_ids_start.size(1))
+                    .type(torch.bool)).to(decoder_input_ids_start.device)
+            
             sequence_output = self.decode(
                 tgt=decoder_input_ids_start,
                 memory=hidden_states,
+                tgt_mask=tgt_mask,
             )
             
             lm_logits = self.lm_head(sequence_output)
