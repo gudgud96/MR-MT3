@@ -137,3 +137,20 @@ python3 test.py \
     eval.audio_dir="/data/nsynth-valid/audio/*.wav" \
     eval.midi_dir="/data/nsynth-valid/midi/" \
     hydra/job_logging=disabled \
+
+# ======= test vanilla transformer ======= #
+python3 test.py \
+    --config-dir="config" \
+    --config-name="config_slakh_f1_0.65" \
+    model="VanillaTransformerNet" \
+    path="../../../pretrained/van_last_16p.ckpt" \
+    eval.eval_dataset="Slakh" \
+    eval.exp_tag_name="slakh_mt3_official" \
+    eval.audio_dir="/data/slakh2100_flac_redux/test/*/mix_16k.wav" \
+    eval.midi_dir="/data/slakh2100_flac_redux/test/" \
+    hydra/job_logging=disabled \
+    eval.is_sanity_check=True   \
+    eval.eval_first_n_examples=1 \
+    eval.contiguous_inference=False \
+    eval.use_tf_spectral_ops=False \
+    # eval.eval_first_n_examples=1 \
