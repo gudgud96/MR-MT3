@@ -97,3 +97,24 @@ HYDRA_FULL_ERROR=1 OMP_NUM_THREADS=1 python3 train.py \
     eval.eval_first_n_examples=3 \
     eval.eval_per_epoch=10 \
     eval.contiguous_inference=False \
+
+#  ======= train vanilla Transformer segmem with prev_frame and context = N  ======= #
+#  This experiment trains vanilla Transformer which takes the immediate previous segment
+#  as memory. The memory block is truncated at length `model_segmem_length`
+#  which corresponds to `L_agg` in the paper.
+HYDRA_FULL_ERROR=1 OMP_NUM_THREADS=1 python3 train.py \
+    --config-path="config" \
+    --config-name="config_slakh_segmem" \
+    devices=[0,1] \
+    hydra/job_logging=disabled \
+    model="VanillaTransformerNetSegMemV2WithPrev" \
+    dataset="SlakhPrev" \
+    dataset_use_tf_spectral_ops=False \
+    dataset_is_randomize_tokens=True \
+    split_frame_length=2000 \
+    model_segmem_length=64 \
+    trainer.check_val_every_n_epoch=20 \
+    eval.eval_after_num_epoch=400 \
+    eval.eval_first_n_examples=3 \
+    eval.eval_per_epoch=10 \
+    eval.contiguous_inference=True \

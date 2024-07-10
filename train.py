@@ -33,7 +33,7 @@ def main(cfg):
                                name=f"{cfg.model_type}_{cfg.dataset_type}")
     
     # sanity check to make sure the correct model is used
-    assert cfg.model_type == cfg.model._target_.split('.')[-1]
+    assert cfg.model_type == cfg.model._target_.split('.')[-1], f"Model type mismatch: {cfg.model_type} {cfg.model._target_.split('.')[-1]}"
 
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
