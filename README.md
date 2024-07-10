@@ -37,10 +37,9 @@ Next, you need to download the required datasets and postprocess them:
 
 Refer to `train.sh` for a list of train commands corresponding to all of our experiments.
 
-You can download our pretrained models at: [TBA]().
-
-
 ## Evaluation
+
+You can download our pretrained models at: [https://huggingface.co/gudgud1014/MR-MT3/tree/main](https://huggingface.co/gudgud1014/MR-MT3/tree/main) to run inference.
 
 Refer to `test.sh`, for a list of test commands corresponding to all of our experiments.
 
