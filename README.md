@@ -4,11 +4,28 @@ Code accompanying paper: [MR-MT3: Memory Retaining Multi-Track Music Transcripti
 
 ## Setup steps
 
-First, you need to install requirements:
 ```
-python3 -m pip install -r requirements.txt
+conda create --name mrmt3 python==3.10 -y
+conda activate mrmt3
+python -m pip install --upgrade pip
+python -m pip install transformers==4.18.0
+python -m pip install torch
+python -m pip install librosa==0.9.1
+python -m pip install t5==0.9.3
+python -m pip install note-seq==0.0.3
+python -m pip install pretty-midi==0.2.9
+python -m pip install einops==0.4.1
+python -m pip install ddsp                                 <- changed : Dont specify version, when installing python 3.10, Because of llvmlite, numba
+python -m pip install tensorflow==2.11
+python -m pip install tensorflow-text==2.11
+python -m pip install protobuf==3.20
+python -m pip install numpy==1.23.5                        <- changed : Scipy requires numpy>=1.23.5
+python -m pip install hydra-core==1.2.0
+python -m pip install typing_extensions
+python -m pip install torchaudio                           <- changed : required 
+python -m pip install tensorflow_probability==0.19.0       <- changed : tensorflow==2.11 requires downgrading this library 
+python -m pip install pytorch_lightning                    <- changed : for import the model
 ```
-Make sure `pip` is up-to-date, which should be able to [reduce backtracking](https://pip.pypa.io/en/stable/topics/dependency-resolution/#possible-ways-to-reduce-backtracking).
 
 Next, you need to download the required datasets and postprocess them:
 
