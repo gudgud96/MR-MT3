@@ -141,7 +141,10 @@ class VanillaTransformerSegMemV2WithPrev(nn.Module):
 
         for i in range(bs):
             print(i + 1, '/', bs, end='\r')
-            decoder_tokens = torch.zeros((1, 1), dtype=torch.long, device=inputs.device)          # (b, 1)
+            # start token for T5 and vanilla transformer is different
+            # hence always use `decoder_start_token_id`
+            decoder_tokens = torch.ones((1, 1), dtype=torch.long, device=inputs.device) * \
+                                self.config.decoder_start_token_id
             cur_enc = hidden_states[i].unsqueeze(0)
 
             if i == 0:
